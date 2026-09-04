@@ -1,0 +1,208 @@
+// Data model for the dealer-network credit application platform.
+// See /docs/architecture.md for the reasoning behind these boundaries.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Tenant root
+// ---------------------------------------------------------------------------
+
+model Manufacturer {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  dealers         Dealer[]
+  lenderPrograms  LenderProgram[]
+  endBuyers       EndBuyer[]
+  applications    CreditApplication[]
+  auditLogEntries AuditLogEntry[]
+
+  @@map("manufacturers")
+}
+
+// ---------------------------------------------------------------------------
+// Dealer network
+// ---------------------------------------------------------------------------
+
+model Dealer {
+  id             String   @id @default(cuid())
+  manufacturerId String
+  name           String
+  code           String
+  contactEmail   String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  manufacturer Manufacturer       @relation(fields: [manufacturerId], references: [id])
+  applications CreditApplication[]
+
+  @@unique([manufacturerId, code])
+  @@map("dealers")
+}
+
+// ---------------------------------------------------------------------------
+// Lenders / financing programs
+// ---------------------------------------------------------------------------
+
+enum LenderProgramType {
+  CAPTIVE
+  THIRD_PARTY
+}
+
+model LenderProgram {
+  id             String            @id @default(cuid())
+  manufacturerId String
+  name           String
+  type           LenderProgramType
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  manufacturer Manufacturer        @relation(fields: [manufacturerId], references: [id])
+  applications CreditApplication[]
+  decisions    Decision[]
+
+  @@map("lender_programs")
+}
+
+// ---------------------------------------------------------------------------
+// End buyers — the data asset. Deliberately manufacturer-scoped and
+// deduplicated so one buyer's history is visible across dealers over time.
+//
+// PRODUCTION NOTE: ssnLast4 is the only SSN fragment stored here. A live
+// deployment that captures a full SSN for a real credit pull MUST NOT persist
+// it in this table (or anywhere in this database) in plaintext. Route it
+// through a PCI/GLBA-compliant vault or tokenization service and store only
+// the token/reference here. This is called out explicitly in
+// /docs/architecture.md — do not "temporarily" add a raw ssn field.
+// ---------------------------------------------------------------------------
+
+model EndBuyer {
+  id             String   @id @default(cuid())
+  manufacturerId String
+  firstName      String
+  lastName       String
+  email          String
+  phone          String
+  addressLine1   String
+  city           String
+  state          String
+  postalCode     String
+  ssnLast4       String
+  incomeBand     String?
+  referralSource String?
+
+  consentCreditPull    Boolean  @default(false)
+  consentDataSharing   Boolean  @default(false)
+  consentMarketing     Boolean  @default(false)
+  consentRecordedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  manufacturer Manufacturer        @relation(fields: [manufacturerId], references: [id])
+  applications CreditApplication[]
+
+  @@unique([manufacturerId, email])
+  @@map("end_buyers")
+}
+
+// ---------------------------------------------------------------------------
+// Credit applications — one submission event. Immutable once submitted:
+// application code should never UPDATE a submitted row's core fields, only
+// append a new Decision and move status forward.
+// ---------------------------------------------------------------------------
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  DECLINED
+  COUNTERED
+}
+
+model CreditApplication {
+  id              String            @id @default(cuid())
+  manufacturerId  String
+  dealerId        String
+  endBuyerId      String
+  lenderProgramId String?
+  productDescription String
+  requestedAmount    Decimal        @db.Decimal(12, 2)
+  status             ApplicationStatus @default(DRAFT)
+  submittedAt        DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  manufacturer  Manufacturer   @relation(fields: [manufacturerId], references: [id])
+  dealer        Dealer         @relation(fields: [dealerId], references: [id])
+  endBuyer      EndBuyer       @relation(fields: [endBuyerId], references: [id])
+  lenderProgram LenderProgram? @relation(fields: [lenderProgramId], references: [id])
+  decisions     Decision[]
+
+  @@index([manufacturerId, dealerId])
+  @@index([manufacturerId, status])
+  @@map("credit_applications")
+}
+
+// ---------------------------------------------------------------------------
+// Decisions — one per lender response. MVP uses a single stubbed decision
+// engine (see src/lib/decision-engine.ts); this table shape already supports
+// a multi-lender cascade without a migration once real lender APIs land.
+// ---------------------------------------------------------------------------
+
+enum DecisionOutcome {
+  APPROVED
+  DECLINED
+  COUNTERED
+}
+
+model Decision {
+  id                  String          @id @default(cuid())
+  creditApplicationId String
+  lenderProgramId     String
+  outcome             DecisionOutcome
+  reasonCode          String
+  reasonText          String
+  termsJson           Json?
+  decidedAt           DateTime        @default(now())
+
+  creditApplication CreditApplication @relation(fields: [creditApplicationId], references: [id])
+  lenderProgram     LenderProgram     @relation(fields: [lenderProgramId], references: [id])
+
+  @@map("decisions")
+}
+
+// ---------------------------------------------------------------------------
+// Audit log — append-only. Every mutation to a credit application or end
+// buyer record writes one row here. Never update or delete rows in this
+// table from application code.
+// ---------------------------------------------------------------------------
+
+model AuditLogEntry {
+  id             String   @id @default(cuid())
+  manufacturerId String
+  entityType     String
+  entityId       String
+  action         String
+  actorType      String
+  actorId        String?
+  payloadJson    Json?
+  createdAt      DateTime @default(now())
+
+  manufacturer Manufacturer @relation(fields: [manufacturerId], references: [id])
+
+  @@index([manufacturerId, entityType, entityId])
+  @@map("audit_log_entries")
+}
