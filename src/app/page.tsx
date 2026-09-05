@@ -5,28 +5,28 @@ export default function HomePage() {
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-4 py-16">
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">
-          Dealer Network Credit Application Platform
+          Commercial Equipment Finance Platform
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          MVP vertical slice — buyer capture, dealer oversight, lender
-          reporting. See /docs/architecture.md for scope and roadmap.
+          Phase 1 pilot — construction/heavy equipment vertical. See
+          /docs/blueprint.md for scope, data model, and acceptance criteria.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <HomeCard
           href="/apply/DLR-001"
-          title="Buyer application"
-          description="Public, embeddable credit application form."
+          title="Business intake"
+          description="Business, owners, guarantors, and equipment request."
         />
         <HomeCard
           href="/dealer/DLR-001"
           title="Dealer view"
-          description="A single dealer's submissions and approval rate."
+          description="A dealer's applications and manual lifecycle actions."
         />
         <HomeCard
           href="/manufacturer"
           title="Manufacturer dashboard"
-          description="Network-wide dealer and lender reporting."
+          description="Network-wide dealer and lender/program reporting."
         />
       </div>
     </main>

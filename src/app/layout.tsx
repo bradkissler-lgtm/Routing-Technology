@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Dealer Network Credit Application Platform",
+  title: "Commercial Equipment Finance Platform",
   description:
-    "Manufacturer platform for dealer oversight, lender reporting, and end-buyer data capture.",
+    "Phase 1 pilot: commercial equipment financing capture, dealer oversight, and lender/program reporting.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

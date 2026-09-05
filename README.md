@@ -1,18 +1,24 @@
-# Dealer Network Credit Application Platform
+# Commercial Equipment Finance Platform
 
-A manufacturer platform for capturing, overseeing, and reporting on
-dealer-network credit applications, lenders, and end-buyer data. See
-[`docs/architecture.md`](docs/architecture.md) for the full spec, data model,
-and roadmap this MVP slice was built against.
+A platform for capturing commercial equipment financing applications
+(business applicant, owners, personal guarantors), logging lender
+submissions and decisions, and reporting on dealer and lender/program
+performance. See [`docs/blueprint.md`](docs/blueprint.md) for the full data
+model, lifecycle design, and the reasoning behind this rebuild.
 
-**Status:** MVP vertical slice. Single manufacturer, single stubbed lender
-decision engine, no auth yet. See "Known limitations" in the architecture doc
-before treating any part of this as production-ready.
+**Status:** Phase 1 pilot build. Construction/heavy-equipment vertical,
+single manufacturer, manual lender-submission and decision logging (no live
+bureau pull or lender API), no auth yet. This branch supersedes the
+consumer-buyer prototype on `main` — see `docs/blueprint.md`, "What changed
+from the original prototype." **Do not use with real applicant data** until
+the legal/compliance review described in the full blueprint document is
+complete.
 
 ## Stack
 
 Next.js (App Router, TypeScript) · Prisma + PostgreSQL · Tailwind CSS · Zod ·
-Vitest. Nothing here is exotic — see "Why this stack" in the architecture doc.
+Vitest — unchanged from the original prototype; this rebuild only changed
+the data model and application logic, not the technology choices.
 
 ## Get running locally (should take under 15 minutes)
 
@@ -37,20 +43,15 @@ Vitest. Nothing here is exotic — see "Why this stack" in the architecture doc.
    cp .env.example .env
    ```
 
-   The defaults in `.env.example` match the Docker Compose service, so if
-   you used step 2 as-is you don't need to change anything.
-
 4. **Run migrations and seed demo data**
 
    ```bash
-   npm run db:migrate   # applies prisma/migrations, or creates a new one if the schema changed
-   npm run db:seed      # seeds one demo manufacturer, 3 dealers, 1 lender program
+   npm run db:migrate
+   npm run db:seed
    ```
 
-   (First run in a fresh database: use `npm run db:migrate` — this runs
-   `prisma migrate dev`, which applies `prisma/migrations/0001_init` since it
-   already exists. `npx prisma migrate deploy` also works and is what CI/prod
-   should use instead, since it never generates new migrations.)
+   Seeds one manufacturer (construction/heavy-equipment vertical), three
+   dealers, and two lenders each with one financing program.
 
 5. **Run the app**
 
@@ -60,12 +61,12 @@ Vitest. Nothing here is exotic — see "Why this stack" in the architecture doc.
 
    Then visit:
    - `http://localhost:3000/` — links to all three surfaces below
-   - `http://localhost:3000/apply/DLR-001` — the buyer-facing application form
-   - `http://localhost:3000/dealer/DLR-001` — that dealer's submissions
+   - `http://localhost:3000/apply/DLR-001` — business/owner/guarantor intake
+   - `http://localhost:3000/dealer/DLR-001` — that dealer's applications
+   - `http://localhost:3000/dealer/DLR-001/applications/<id>` — an
+     application's detail page, where lender submissions, decisions,
+     acceptance, and funding are logged manually
    - `http://localhost:3000/manufacturer` — the network-wide dashboard
-
-   Submit an application at `/apply/DLR-001` and watch it show up on the
-   dealer and manufacturer pages immediately.
 
 ## Scripts
 
@@ -76,7 +77,7 @@ Vitest. Nothing here is exotic — see "Why this stack" in the architecture doc.
 | `npm run test`        | Run the unit test suite (Vitest)                          |
 | `npm run lint`        | ESLint                                                     |
 | `npm run db:migrate`  | Apply/create migrations against `DATABASE_URL` (dev)       |
-| `npm run db:seed`     | Seed demo manufacturer/dealers/lender program              |
+| `npm run db:seed`     | Seed demo manufacturer/dealers/lenders/programs            |
 | `npm run db:studio`   | Prisma Studio — browse the database visually               |
 
 ## Project layout
@@ -85,26 +86,34 @@ Vitest. Nothing here is exotic — see "Why this stack" in the architecture doc.
 prisma/
   schema.prisma        # the data model — read this first
   migrations/           # SQL migrations, checked in and reviewable
-  seed.ts                # demo data for local dev
+  seed.ts                # demo data (construction/heavy equipment vertical)
 src/
   app/
-    apply/[dealerCode]/   # buyer-facing application form (public)
-    dealer/[dealerCode]/  # dealer oversight view (read-only, no auth yet)
-    manufacturer/          # manufacturer network dashboard (no auth yet)
-    api/applications/      # POST endpoint dealers'/DMSs' own systems can call directly
-  components/            # ApplicationForm, StatusBadge
+    apply/[dealerCode]/                              # business/owner/guarantor intake (public)
+    dealer/[dealerCode]/                              # dealer application list (no auth yet)
+    dealer/[dealerCode]/applications/[applicationId]/ # manual lifecycle ops screen
+    manufacturer/                                      # network dashboard (no auth yet)
+    api/applications/                                  # intake endpoint
+    api/applications/[id]/submissions/                 # log a lender submission
+    api/submissions/[id]/decision/                     # record a decision
+    api/applications/[id]/accept/                      # accept an offer
+    api/applications/[id]/fund/                        # confirm funding
+  components/            # IntakeForm, ApplicationOpsPanel, StatusBadge
   lib/
-    decision-engine.ts    # STUB — replace before any real lender integration
-    validation.ts          # Zod schemas shared by the form and the API route
-    audit-log.ts            # append-only audit trail helper
-    manufacturer.ts          # single-tenant lookup (see "Known limitations")
+    application-status.ts # pure lifecycle-status derivation (unit tested)
+    lifecycle.ts            # recomputes + persists Application.status
+    validation.ts             # Zod schemas for intake and lifecycle actions
+    audit-log.ts               # append-only audit trail helper
+    manufacturer.ts              # single-tenant lookup
 docs/
-  architecture.md         # full spec, data model rationale, roadmap, handoff package
+  blueprint.md            # engineering summary of the corrected model
 ```
 
 ## Before you build on this
 
-Read [`docs/architecture.md`](docs/architecture.md) — specifically "Known
-limitations" and "Before this touches real money or real lenders." The stub
-decision engine, the lack of auth, and the SSN-handling note are not
-oversights; they're documented scope boundaries for an MVP demo.
+Read [`docs/blueprint.md`](docs/blueprint.md) — specifically "Known
+limitations." No authentication, no live bureau pull, and manual
+lender-submission/decision logging are documented Phase 1 scope
+boundaries, not oversights. The full blueprint document (outside this
+repo) covers the legal-posture and data-rights sections this markdown
+summary doesn't repeat.

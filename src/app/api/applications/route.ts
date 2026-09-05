@@ -1,22 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
-import { creditApplicationInputSchema } from "@/lib/validation";
-import { evaluateApplication } from "@/lib/decision-engine";
+import { applicationIntakeSchema } from "@/lib/validation";
 import { recordAuditEvent } from "@/lib/audit-log";
 
 /**
- * Dealer point-of-sale submission endpoint. This is the one API surface a
- * dealer's DMS should call directly instead of using the hosted /apply form
- * (see /docs/architecture.md, "Front-end capture"). Keep this handler on the
- * fast, transactional path — no analytics or reporting queries here.
+ * Dealer-initiated intake for a commercial equipment financing application
+ * (Blueprint §2.1). Creates the BusinessApplicant, its Owners, the
+ * Guarantors on this application, per-participant ConsentRecords, and the
+ * Application itself in one transaction.
+ *
+ * Phase 1 explicitly excludes live lender submission at intake time
+ * (Blueprint §2.4) — this endpoint only records the request. Submitting to
+ * a lender and recording that lender's decision are separate, manual steps
+ * (see /api/applications/[applicationId]/submissions and
+ * /api/submissions/[submissionId]/decision).
  */
 export async function POST(request: NextRequest) {
   let input;
   try {
-    input = creditApplicationInputSchema.parse(await request.json());
+    input = applicationIntakeSchema.parse(await request.json());
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json(
@@ -31,10 +35,7 @@ export async function POST(request: NextRequest) {
 
   const dealer = await prisma.dealer.findUnique({
     where: {
-      manufacturerId_code: {
-        manufacturerId: manufacturer.id,
-        code: input.dealerCode,
-      },
+      manufacturerId_code: { manufacturerId: manufacturer.id, code: input.dealerCode },
     },
   });
 
@@ -45,77 +46,49 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const lenderProgram = await prisma.lenderProgram.findFirst({
-    where: { manufacturerId: manufacturer.id, isActive: true },
-  });
-
-  if (!lenderProgram) {
-    return NextResponse.json(
-      { error: "No active lender program configured for this manufacturer" },
-      { status: 500 },
-    );
-  }
-
   const result = await prisma.$transaction(async (tx) => {
-    const endBuyer = await tx.endBuyer.upsert({
-      where: {
-        manufacturerId_email: {
-          manufacturerId: manufacturer.id,
-          email: input.buyer.email,
-        },
-      },
-      update: {
-        firstName: input.buyer.firstName,
-        lastName: input.buyer.lastName,
-        phone: input.buyer.phone,
-        addressLine1: input.buyer.addressLine1,
-        city: input.buyer.city,
-        state: input.buyer.state,
-        postalCode: input.buyer.postalCode,
-        ssnLast4: input.buyer.ssnLast4,
-        incomeBand: input.buyer.incomeBand,
-        referralSource: input.buyer.referralSource,
-        consentCreditPull: input.consent.creditPull,
-        consentDataSharing: input.consent.dataSharing,
-        consentMarketing: input.consent.marketing,
-        consentRecordedAt: new Date(),
-      },
-      create: {
+    const businessApplicant = await tx.businessApplicant.create({
+      data: {
         manufacturerId: manufacturer.id,
-        firstName: input.buyer.firstName,
-        lastName: input.buyer.lastName,
-        email: input.buyer.email,
-        phone: input.buyer.phone,
-        addressLine1: input.buyer.addressLine1,
-        city: input.buyer.city,
-        state: input.buyer.state,
-        postalCode: input.buyer.postalCode,
-        ssnLast4: input.buyer.ssnLast4,
-        incomeBand: input.buyer.incomeBand,
-        referralSource: input.buyer.referralSource,
-        consentCreditPull: input.consent.creditPull,
-        consentDataSharing: input.consent.dataSharing,
-        consentMarketing: input.consent.marketing,
-        consentRecordedAt: new Date(),
+        legalName: input.business.legalName,
+        ein: input.business.ein,
+        addressLine1: input.business.addressLine1,
+        city: input.business.city,
+        state: input.business.state,
+        postalCode: input.business.postalCode,
       },
     });
 
     await recordAuditEvent(tx, {
       manufacturerId: manufacturer.id,
-      entityType: "EndBuyer",
-      entityId: endBuyer.id,
-      action: "UPSERT",
-      actorType: "BUYER",
+      entityType: "BusinessApplicant",
+      entityId: businessApplicant.id,
+      action: "CREATE",
+      actorType: "DEALER",
     });
 
-    const application = await tx.creditApplication.create({
+    const owners = [];
+    for (const ownerInput of input.owners) {
+      const owner = await tx.owner.create({
+        data: {
+          businessApplicantId: businessApplicant.id,
+          firstName: ownerInput.firstName,
+          lastName: ownerInput.lastName,
+          title: ownerInput.title,
+          ownershipPercent: ownerInput.ownershipPercent,
+        },
+      });
+      owners.push(owner);
+    }
+
+    const application = await tx.application.create({
       data: {
         manufacturerId: manufacturer.id,
         dealerId: dealer.id,
-        endBuyerId: endBuyer.id,
-        lenderProgramId: lenderProgram.id,
-        productDescription: input.application.productDescription,
-        requestedAmount: input.application.requestedAmount,
+        applicantType: "BUSINESS",
+        businessApplicantId: businessApplicant.id,
+        equipmentDescription: input.equipment.description,
+        requestedAmount: input.equipment.requestedAmount,
         status: "SUBMITTED",
         submittedAt: new Date(),
       },
@@ -123,57 +96,86 @@ export async function POST(request: NextRequest) {
 
     await recordAuditEvent(tx, {
       manufacturerId: manufacturer.id,
-      entityType: "CreditApplication",
+      entityType: "Application",
       entityId: application.id,
       action: "SUBMIT",
-      actorType: "BUYER",
+      actorType: "DEALER",
     });
 
-    const decisionResult = evaluateApplication({
-      requestedAmount: input.application.requestedAmount,
-      incomeBand: input.buyer.incomeBand,
-    });
-
-    const decision = await tx.decision.create({
+    // Business-level consent record (Blueprint §2.1: this covers the
+    // business's own data use — it does NOT cover any guarantor below).
+    await tx.consentRecord.create({
       data: {
-        creditApplicationId: application.id,
-        lenderProgramId: lenderProgram.id,
-        outcome: decisionResult.outcome,
-        reasonCode: decisionResult.reasonCode,
-        reasonText: decisionResult.reasonText,
-        termsJson: (decisionResult.termsJson ?? undefined) as
-          | Prisma.InputJsonValue
-          | undefined,
+        applicationId: application.id,
+        participantType: "BUSINESS",
+        participantId: businessApplicant.id,
+        purpose: "DATA_SHARING",
+        granted: input.business.consent.dataSharing,
+      },
+    });
+    await tx.consentRecord.create({
+      data: {
+        applicationId: application.id,
+        participantType: "BUSINESS",
+        participantId: businessApplicant.id,
+        purpose: "MARKETING",
+        granted: input.business.consent.marketing,
       },
     });
 
-    const updatedApplication = await tx.creditApplication.update({
-      where: { id: application.id },
-      data: { status: decisionResult.outcome },
-    });
+    for (const guarantorInput of input.guarantors) {
+      const linkedOwner =
+        guarantorInput.ownerIndex !== undefined ? owners[guarantorInput.ownerIndex] : undefined;
 
-    await recordAuditEvent(tx, {
-      manufacturerId: manufacturer.id,
-      entityType: "CreditApplication",
-      entityId: application.id,
-      action: "DECISION",
-      actorType: "SYSTEM",
-      payload: { reasonCode: decisionResult.reasonCode },
-    });
+      const guarantor = await tx.guarantor.create({
+        data: {
+          applicationId: application.id,
+          ownerId: linkedOwner?.id,
+          firstName: guarantorInput.firstName,
+          lastName: guarantorInput.lastName,
+          addressLine1: guarantorInput.addressLine1,
+          city: guarantorInput.city,
+          state: guarantorInput.state,
+          postalCode: guarantorInput.postalCode,
+          ssnLast4: guarantorInput.ssnLast4,
+          consentCreditPull: guarantorInput.consent.creditPull,
+          consentDataSharing: guarantorInput.consent.dataSharing,
+          consentRecordedAt: new Date(),
+        },
+      });
 
-    return { application: updatedApplication, decision };
+      await recordAuditEvent(tx, {
+        manufacturerId: manufacturer.id,
+        entityType: "Guarantor",
+        entityId: guarantor.id,
+        action: "CREATE",
+        actorType: "DEALER",
+      });
+
+      // Each guarantor's own authorization — distinct from the business's
+      // consent above, per participant, per purpose (Blueprint §2.1).
+      await tx.consentRecord.create({
+        data: {
+          applicationId: application.id,
+          participantType: "GUARANTOR",
+          participantId: guarantor.id,
+          purpose: "CREDIT_PULL",
+          granted: guarantorInput.consent.creditPull,
+        },
+      });
+      await tx.consentRecord.create({
+        data: {
+          applicationId: application.id,
+          participantType: "GUARANTOR",
+          participantId: guarantor.id,
+          purpose: "DATA_SHARING",
+          granted: guarantorInput.consent.dataSharing,
+        },
+      });
+    }
+
+    return application;
   });
 
-  return NextResponse.json(
-    {
-      applicationId: result.application.id,
-      status: result.application.status,
-      decision: {
-        outcome: result.decision.outcome,
-        reasonText: result.decision.reasonText,
-        terms: result.decision.termsJson,
-      },
-    },
-    { status: 201 },
-  );
+  return NextResponse.json({ applicationId: result.id, status: result.status }, { status: 201 });
 }

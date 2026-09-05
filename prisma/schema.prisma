@@ -1,5 +1,7 @@
-// Data model for the dealer-network credit application platform.
-// See /docs/architecture.md for the reasoning behind these boundaries.
+// Data model for the commercial equipment finance platform.
+// See /docs/blueprint.md for the full reasoning — this schema implements
+// the corrected participant model and application lifecycle from the
+// developer-ready blueprint (Foundation §1.3-1.4, Pilot Spec §2.2).
 
 generator client {
   provider = "prisma-client-js"
@@ -21,11 +23,13 @@ model Manufacturer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dealers         Dealer[]
-  lenderPrograms  LenderProgram[]
-  endBuyers       EndBuyer[]
-  applications    CreditApplication[]
-  auditLogEntries AuditLogEntry[]
+  dealers           Dealer[]
+  financingPrograms FinancingProgram[]
+  businessApplicants BusinessApplicant[]
+  individualApplicants IndividualApplicant[]
+  applications      Application[]
+  auditLogEntries   AuditLogEntry[]
+  dataRetentionEvents DataRetentionEvent[]
 
   @@map("manufacturers")
 }
@@ -44,51 +48,107 @@ model Dealer {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  manufacturer Manufacturer       @relation(fields: [manufacturerId], references: [id])
-  applications CreditApplication[]
+  manufacturer Manufacturer  @relation(fields: [manufacturerId], references: [id])
+  applications Application[]
 
   @@unique([manufacturerId, code])
   @@map("dealers")
 }
 
 // ---------------------------------------------------------------------------
-// Lenders / financing programs
+// Lenders and their financing programs — kept as separate entities per
+// Blueprint §1.4: a Lender may run several Programs, and a Program may be
+// captive or third-party. Reporting on "which program approves what"
+// requires them not to be conflated.
 // ---------------------------------------------------------------------------
 
-enum LenderProgramType {
+model Lender {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  programs FinancingProgram[]
+
+  @@map("lenders")
+}
+
+enum FinancingProgramType {
   CAPTIVE
   THIRD_PARTY
 }
 
-model LenderProgram {
-  id             String            @id @default(cuid())
+model FinancingProgram {
+  id             String               @id @default(cuid())
   manufacturerId String
+  lenderId       String
   name           String
-  type           LenderProgramType
-  isActive       Boolean           @default(true)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  type           FinancingProgramType
+  isActive       Boolean              @default(true)
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
 
-  manufacturer Manufacturer        @relation(fields: [manufacturerId], references: [id])
-  applications CreditApplication[]
-  decisions    Decision[]
+  manufacturer Manufacturer     @relation(fields: [manufacturerId], references: [id])
+  lender       Lender           @relation(fields: [lenderId], references: [id])
+  submissions  LenderSubmission[]
 
-  @@map("lender_programs")
+  @@map("financing_programs")
 }
 
 // ---------------------------------------------------------------------------
-// End buyers — the data asset. Deliberately manufacturer-scoped and
-// deduplicated so one buyer's history is visible across dealers over time.
-//
-// PRODUCTION NOTE: ssnLast4 is the only SSN fragment stored here. A live
-// deployment that captures a full SSN for a real credit pull MUST NOT persist
-// it in this table (or anywhere in this database) in plaintext. Route it
-// through a PCI/GLBA-compliant vault or tokenization service and store only
-// the token/reference here. This is called out explicitly in
-// /docs/architecture.md — do not "temporarily" add a raw ssn field.
+// Business applicants — Phase 1 primary applicant type (Blueprint §1.4).
+// Business financial data is NOT a "consumer report" under FCRA (the
+// business is not a "consumer"); ordinary commercial data-sharing terms
+// govern it, not FCRA. See /docs/blueprint.md §1.3.
 // ---------------------------------------------------------------------------
 
-model EndBuyer {
+model BusinessApplicant {
+  id             String   @id @default(cuid())
+  manufacturerId String
+  legalName      String
+  ein            String?
+  addressLine1   String
+  city           String
+  state          String
+  postalCode     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  manufacturer Manufacturer  @relation(fields: [manufacturerId], references: [id])
+  owners       Owner[]
+  applications Application[]
+
+  @@index([manufacturerId, legalName])
+  @@map("business_applicants")
+}
+
+// A person with equity or control in a BusinessApplicant. May or may not
+// also be a Guarantor on any given application — tracked separately, never
+// assumed (Blueprint §1.4). Not a consumer-report subject by itself; only
+// becomes one if also captured as a Guarantor who is credit-pulled.
+model Owner {
+  id                  String  @id @default(cuid())
+  businessApplicantId String
+  firstName           String
+  lastName            String
+  title               String?
+  ownershipPercent     Decimal? @db.Decimal(5, 2)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  businessApplicant BusinessApplicant @relation(fields: [businessApplicantId], references: [id])
+  guarantorLinks    Guarantor[]
+
+  @@map("owners")
+}
+
+// ---------------------------------------------------------------------------
+// Individual applicants — Phase 2 (consumer mode). Modeled now so the
+// schema doesn't need a breaking change when Phase 2 ships (Blueprint,
+// Confirmed Operating Parameters: "phased, both").
+// ---------------------------------------------------------------------------
+
+model IndividualApplicant {
   id             String   @id @default(cuid())
   manufacturerId String
   firstName      String
@@ -99,69 +159,180 @@ model EndBuyer {
   city           String
   state          String
   postalCode     String
-  ssnLast4       String
-  incomeBand     String?
-  referralSource String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  consentCreditPull    Boolean  @default(false)
-  consentDataSharing   Boolean  @default(false)
-  consentMarketing     Boolean  @default(false)
-  consentRecordedAt    DateTime?
+  manufacturer Manufacturer  @relation(fields: [manufacturerId], references: [id])
+  applications Application[]
+
+  @@index([manufacturerId, email])
+  @@map("individual_applicants")
+}
+
+// ---------------------------------------------------------------------------
+// Guarantors — a person (rarely another entity) personally guaranteeing the
+// obligation on ONE application. Distinct from Owner even when it's the
+// same individual (optional link via ownerId, never assumed).
+//
+// PRODUCTION NOTE (Blueprint §1.3 field-level matrix): a Guarantor's SSN and
+// credit report/score ARE consumer-report-adjacent data under FCRA once a
+// lender pulls credit on them. Only ssnLast4 is stored here; a live
+// deployment must not persist a full SSN or raw bureau report in this
+// table. Route those through a PCI/GLBA-compliant vault or tokenization
+// service and store only a reference. Retention for this entire model must
+// follow the disposal schedule in the data-rights matrix, NOT the
+// "permanent" retention that applies to the audit trail — see
+// DataRetentionEvent below.
+// ---------------------------------------------------------------------------
+
+model Guarantor {
+  id            String   @id @default(cuid())
+  applicationId String
+  ownerId       String?
+  firstName     String
+  lastName      String
+  addressLine1  String
+  city          String
+  state         String
+  postalCode    String
+  ssnLast4      String
+
+  consentCreditPull  Boolean   @default(false)
+  consentDataSharing Boolean   @default(false)
+  consentRecordedAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  manufacturer Manufacturer        @relation(fields: [manufacturerId], references: [id])
-  applications CreditApplication[]
+  application Application @relation(fields: [applicationId], references: [id])
+  owner       Owner?      @relation(fields: [ownerId], references: [id])
 
-  @@unique([manufacturerId, email])
-  @@map("end_buyers")
+  @@map("guarantors")
 }
 
 // ---------------------------------------------------------------------------
-// Credit applications — one submission event. Immutable once submitted:
-// application code should never UPDATE a submitted row's core fields, only
-// append a new Decision and move status forward.
+// Consent — one record per participant per purpose, never one blanket
+// consent per application (Blueprint §2.1: a business-level consent does
+// not cover an individual guarantor's separate authorization).
+// participantType/participantId form a lightweight polymorphic reference
+// (Prisma has no native polymorphic relation) to whichever participant
+// granted this consent: BUSINESS -> BusinessApplicant.id,
+// GUARANTOR -> Guarantor.id, INDIVIDUAL -> IndividualApplicant.id.
 // ---------------------------------------------------------------------------
 
+enum ConsentParticipantType {
+  BUSINESS
+  GUARANTOR
+  INDIVIDUAL
+}
+
+enum ConsentPurpose {
+  CREDIT_PULL
+  DATA_SHARING
+  MARKETING
+}
+
+model ConsentRecord {
+  id              String                 @id @default(cuid())
+  applicationId   String
+  participantType ConsentParticipantType
+  participantId   String
+  purpose         ConsentPurpose
+  granted         Boolean
+  recordedAt      DateTime               @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id])
+
+  @@index([applicationId, participantType, participantId])
+  @@map("consent_records")
+}
+
+// ---------------------------------------------------------------------------
+// Application lifecycle (Blueprint §1.3 / §2.2):
+//   Application -> LenderSubmission(s) -> Decision -> AcceptedOffer -> FundedTransaction
+// Approval rate, volume, and time-to-decision MUST be computed at the
+// Application level using AcceptedOffer/FundedTransaction as the success
+// criterion — never by counting individual LenderSubmission decisions,
+// which distorts these figures whenever a cascade is used.
+// ---------------------------------------------------------------------------
+
+enum ApplicantType {
+  BUSINESS
+  INDIVIDUAL
+}
+
+// Derived/reporting status, kept as a stored field for query performance and
+// updated by application code as the lifecycle chain below changes. See
+// /docs/blueprint.md §1.7 for PENDING_RECONCILIATION's purpose: an
+// application that hasn't reached a confirmed final disposition must carry
+// an explicit "unknown" status, never be silently dropped from reporting.
 enum ApplicationStatus {
-  DRAFT
   SUBMITTED
-  APPROVED
-  DECLINED
-  COUNTERED
+  IN_PROGRESS
+  ACCEPTED
+  FUNDED
+  CLOSED_LOST
+  PENDING_RECONCILIATION
 }
 
-model CreditApplication {
-  id              String            @id @default(cuid())
-  manufacturerId  String
-  dealerId        String
-  endBuyerId      String
-  lenderProgramId String?
-  productDescription String
-  requestedAmount    Decimal        @db.Decimal(12, 2)
-  status             ApplicationStatus @default(DRAFT)
-  submittedAt        DateTime?
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+model Application {
+  id                    String        @id @default(cuid())
+  manufacturerId        String
+  dealerId              String
+  applicantType         ApplicantType
+  businessApplicantId   String?
+  individualApplicantId String?
+  equipmentDescription  String
+  requestedAmount       Decimal       @db.Decimal(12, 2)
+  status                ApplicationStatus @default(SUBMITTED)
+  needsReconciliation   Boolean       @default(false)
+  submittedAt           DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 
-  manufacturer  Manufacturer   @relation(fields: [manufacturerId], references: [id])
-  dealer        Dealer         @relation(fields: [dealerId], references: [id])
-  endBuyer      EndBuyer       @relation(fields: [endBuyerId], references: [id])
-  lenderProgram LenderProgram? @relation(fields: [lenderProgramId], references: [id])
-  decisions     Decision[]
+  manufacturer        Manufacturer         @relation(fields: [manufacturerId], references: [id])
+  dealer               Dealer               @relation(fields: [dealerId], references: [id])
+  businessApplicant    BusinessApplicant?   @relation(fields: [businessApplicantId], references: [id])
+  individualApplicant  IndividualApplicant? @relation(fields: [individualApplicantId], references: [id])
+  guarantors           Guarantor[]
+  consentRecords       ConsentRecord[]
+  lenderSubmissions    LenderSubmission[]
+  acceptedOffer        AcceptedOffer?
 
   @@index([manufacturerId, dealerId])
   @@index([manufacturerId, status])
-  @@map("credit_applications")
+  @@map("applications")
 }
 
-// ---------------------------------------------------------------------------
-// Decisions — one per lender response. MVP uses a single stubbed decision
-// engine (see src/lib/decision-engine.ts); this table shape already supports
-// a multi-lender cascade without a migration once real lender APIs land.
-// ---------------------------------------------------------------------------
+// One attempt to a specific Lender's Program. A cascade produces several
+// per Application. Each LenderSubmission has exactly one Decision.
+enum LenderSubmissionStatus {
+  SUBMITTED
+  DECISIONED
+}
 
+model LenderSubmission {
+  id                 String                 @id @default(cuid())
+  applicationId      String
+  financingProgramId String
+  status             LenderSubmissionStatus @default(SUBMITTED)
+  submittedAt        DateTime               @default(now())
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  application      Application      @relation(fields: [applicationId], references: [id])
+  financingProgram FinancingProgram @relation(fields: [financingProgramId], references: [id])
+  decision         Decision?
+
+  @@index([applicationId])
+  @@map("lender_submissions")
+}
+
+// One lender's response to one submission. Phase 1 has no live lender API
+// or bureau pull — every Decision here is manually entered by a dealer or
+// platform operator (Blueprint §2.1, §2.4). `enteredBy` is a free-text
+// identifier for now since Phase 1 has no auth; replace with a real user
+// reference once auth exists.
 enum DecisionOutcome {
   APPROVED
   DECLINED
@@ -169,25 +340,55 @@ enum DecisionOutcome {
 }
 
 model Decision {
-  id                  String          @id @default(cuid())
-  creditApplicationId String
-  lenderProgramId     String
-  outcome             DecisionOutcome
-  reasonCode          String
-  reasonText          String
-  termsJson           Json?
-  decidedAt           DateTime        @default(now())
+  id                 String          @id @default(cuid())
+  lenderSubmissionId String          @unique
+  outcome            DecisionOutcome
+  reasonCode         String
+  reasonText         String
+  termsJson          Json?
+  enteredBy          String
+  decidedAt          DateTime        @default(now())
 
-  creditApplication CreditApplication @relation(fields: [creditApplicationId], references: [id])
-  lenderProgram     LenderProgram     @relation(fields: [lenderProgramId], references: [id])
+  lenderSubmission LenderSubmission @relation(fields: [lenderSubmissionId], references: [id])
+  acceptedOffer    AcceptedOffer?
 
   @@map("decisions")
 }
 
+// The single offer the applicant chose, if any. One-to-one with
+// Application: an application has zero-or-one accepted offer.
+model AcceptedOffer {
+  id            String   @id @default(cuid())
+  applicationId String   @unique
+  decisionId    String   @unique
+  acceptedAt    DateTime @default(now())
+
+  application     Application      @relation(fields: [applicationId], references: [id])
+  decision        Decision         @relation(fields: [decisionId], references: [id])
+  fundedTransaction FundedTransaction?
+
+  @@map("accepted_offers")
+}
+
+// Confirms money actually moved — the real "done" state for approval-rate
+// and volume reporting (Blueprint §1.3).
+model FundedTransaction {
+  id              String   @id @default(cuid())
+  acceptedOfferId String   @unique
+  fundedAmount    Decimal  @db.Decimal(12, 2)
+  fundedAt        DateTime @default(now())
+
+  acceptedOffer AcceptedOffer @relation(fields: [acceptedOfferId], references: [id])
+
+  @@map("funded_transactions")
+}
+
 // ---------------------------------------------------------------------------
-// Audit log — append-only. Every mutation to a credit application or end
-// buyer record writes one row here. Never update or delete rows in this
-// table from application code.
+// Audit log — append-only. Every mutation to an application or a
+// participant record writes one row here. Never update or delete rows in
+// this table from application code. References sensitive records rather
+// than embedding them, so a payload can be purged (see DataRetentionEvent)
+// without breaking the audit history (Blueprint §1.3).
 // ---------------------------------------------------------------------------
 
 model AuditLogEntry {
@@ -205,4 +406,26 @@ model AuditLogEntry {
 
   @@index([manufacturerId, entityType, entityId])
   @@map("audit_log_entries")
+}
+
+// Records a purge/tokenization action taken against a sensitive payload
+// (e.g., a Guarantor's stored fields past their retention window).
+// Referenced by the audit log rather than replacing it, so the fact that a
+// decision happened remains permanent even after the sensitive payload
+// behind it is gone (Blueprint §1.3 — "immutable" is not the same as
+// "permanent retention of sensitive payloads").
+model DataRetentionEvent {
+  id             String   @id @default(cuid())
+  manufacturerId String
+  entityType     String
+  entityId       String
+  fieldName      String
+  action         String
+  note           String?
+  performedAt    DateTime @default(now())
+
+  manufacturer Manufacturer @relation(fields: [manufacturerId], references: [id])
+
+  @@index([manufacturerId, entityType, entityId])
+  @@map("data_retention_events")
 }

@@ -1,17 +1,16 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
-import { ApplicationForm } from "@/components/ApplicationForm";
+import { IntakeForm } from "@/components/IntakeForm";
 
-// Always live data — looks up the dealer by code on every request, and
-// isn't safe to prerender at build time (no DB connection then).
 export const dynamic = "force-dynamic";
 
 /**
- * Public, embeddable buyer-facing credit application. A dealer can point a
- * QR code, a link, or an <iframe> at /apply/<their-code> from their own
- * point-of-sale flow. No auth — this is intentionally the lowest-friction
- * surface in the system (see /docs/architecture.md, "User experience").
+ * Dealer-facing intake for a commercial equipment financing application.
+ * No auth yet (see /docs/architecture.md, "Known limitations") — a real
+ * deployment puts this behind dealer-user login, which matters more here
+ * than it did for the earlier consumer prototype since real business and
+ * guarantor PII flows through this form.
  */
 export default async function ApplyPage({
   params,
@@ -22,12 +21,7 @@ export default async function ApplyPage({
   const manufacturer = await getCurrentManufacturer();
 
   const dealer = await prisma.dealer.findUnique({
-    where: {
-      manufacturerId_code: {
-        manufacturerId: manufacturer.id,
-        code: dealerCode,
-      },
-    },
+    where: { manufacturerId_code: { manufacturerId: manufacturer.id, code: dealerCode } },
   });
 
   if (!dealer || !dealer.isActive) {
@@ -38,17 +32,16 @@ export default async function ApplyPage({
     <main className="mx-auto flex min-h-screen max-w-xl flex-col gap-6 px-4 py-10 sm:py-16">
       <div className="text-center">
         <p className="text-sm font-medium text-slate-500">
-          {manufacturer.name} · Financing Application
+          {manufacturer.name} · Equipment Financing Application
         </p>
         <h1 className="mt-1 text-2xl font-semibold text-slate-900">
           Apply for financing at {dealer.name}
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          Takes about two minutes. Your information is only shared with{" "}
-          {dealer.name} and the lender you approve below.
+          For the business, its owners, and anyone personally guaranteeing this financing.
         </p>
       </div>
-      <ApplicationForm dealerCode={dealer.code} />
+      <IntakeForm dealerCode={dealer.code} />
     </main>
   );
 }
