@@ -51,7 +51,7 @@ logic, and (as of 2026-09-06) added login, not the core technology choices.
 
    Also set `AUTH_SECRET` — generate one with `openssl rand -base64 32`.
 
-4. **Run migrations and seed demo data**
+4. **Run migrations and seed data**
 
    ```bash
    npm run db:migrate
@@ -60,7 +60,10 @@ logic, and (as of 2026-09-06) added login, not the core technology choices.
 
    Seeds one manufacturer (construction/heavy-equipment vertical), three
    dealers, two lenders each with one financing program, and demo logins
-   (see "Sign in" below).
+   (see "Sign in" below) — no applications yet, a clean slate for local
+   dev/testing. For a sales demo instead, run `npm run db:seed:demo` (see
+   "Sales demo data" below) in addition — it seeds the same base plus a
+   full storyline of applications.
 
 5. **Run the app**
 
@@ -102,6 +105,55 @@ Once signed in:
 - `http://localhost:3000/manufacturer` — the network-wide dashboard
   (requires the `manufacturer@demo.local` login)
 
+## Sales demo data
+
+`npm run db:seed:demo` seeds the same manufacturer/dealers/lenders/logins as
+`npm run db:seed`, plus a full storyline of 8 applications spanning every
+status and decision outcome the platform tracks — deliberately including an
+honest loss (`CLOSED_LOST`) and an unresolved case (flagged `needsReconciliation`),
+not just manufactured wins, since a demo that only shows success isn't
+credible to a technical buyer. It also adds a third financing program
+(`Timberline Equipment Advantage`) with a FICO routing rule, so the rare
+`BureauPull` path (Blueprint §1.2) has a real example to show, not just a
+description. See `prisma/seed-demo.ts` for exactly what it creates. It is
+not idempotent like `db:seed` — run it once against a fresh database.
+
+## Deploying a live demo (Vercel)
+
+For a demo you can pull up anywhere — not just from one laptop — deploy to
+Vercel with a hosted Postgres database:
+
+1. **Push this branch to GitHub** (already done if you're reading this from
+   the repo) and go to [vercel.com/new](https://vercel.com/new), then import
+   the `bradkissler-lgtm/Routing-Technology` repo. Under "Configure Project,"
+   set the **Branch** to deploy from (this rebuild branch, or `main` once
+   merged).
+2. **Add a Postgres database.** In the Vercel project, go to Storage → add
+   a Postgres integration (Vercel Postgres, or connect Neon/Supabase). This
+   sets a `DATABASE_URL`-equivalent env var automatically, or gives you a
+   connection string to add yourself — either way, make sure the app reads
+   it as `DATABASE_URL` (rename the env var if the integration names it
+   something else, e.g. `POSTGRES_PRISMA_URL`).
+3. **Set the remaining environment variables** (Project → Settings →
+   Environment Variables):
+   - `DATABASE_URL` — from step 2.
+   - `AUTH_SECRET` — generate with `openssl rand -base64 32`.
+   - `DEMO_MANUFACTURER_SLUG` — `demo-manufacturer`.
+4. **Deploy.** Vercel detects the `vercel-build` script in `package.json`
+   (`prisma generate && prisma migrate deploy && next build`), which applies
+   migrations automatically on every deploy — safe to re-run, unlike
+   `migrate dev`.
+5. **Seed once, after the first successful deploy.** Vercel doesn't run
+   seed scripts automatically (a seed is a one-time data load, not part of
+   the build). From your machine, with the production `DATABASE_URL` set
+   locally for this one command only:
+   ```bash
+   DATABASE_URL="<paste the production connection string>" npm run db:seed:demo
+   ```
+   Then visit the Vercel-assigned URL and sign in with the credentials in
+   "Sign in" above — it's now a real link you can send or pull up in any
+   meeting, not dependent on your laptop.
+
 ## Scripts
 
 | Command              | What it does                                             |
@@ -111,7 +163,8 @@ Once signed in:
 | `npm run test`        | Run the unit test suite (Vitest)                          |
 | `npm run lint`        | ESLint                                                     |
 | `npm run db:migrate`  | Apply/create migrations against `DATABASE_URL` (dev)       |
-| `npm run db:seed`     | Seed demo manufacturer/dealers/lenders/programs/logins      |
+| `npm run db:seed`     | Seed manufacturer/dealers/lenders/programs/logins (no applications) |
+| `npm run db:seed:demo`| Seed the same, plus a full sales-demo application storyline |
 | `npm run db:studio`   | Prisma Studio — browse the database visually               |
 
 ## Project layout
@@ -120,7 +173,8 @@ Once signed in:
 prisma/
   schema.prisma        # the data model — read this first
   migrations/           # SQL migrations, checked in and reviewable
-  seed.ts                # demo data + demo logins (construction/heavy equipment vertical)
+  seed.ts                # base data + demo logins, no applications (clean slate)
+  seed-demo.ts            # same base, plus a full sales-demo application storyline
 src/
   proxy.ts                                              # requires a session for every protected route (next-auth)
   app/
