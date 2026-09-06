@@ -121,10 +121,14 @@ Every one of these is a Phase 1 scope boundary (see the blueprint's
   seeded manufacturer via `DEMO_MANUFACTURER_SLUG`.
 - **No DMS integration, no automated reconciliation job.** Both are manual
   processes for Phase 1.
-- **No legal/compliance sign-off has happened.** This code must not be
+- **No legal/compliance sign-off has happened yet.** This code must not be
   used with real applicant data until that review (the blueprint's M5) is
-  complete — see the full blueprint document for what that review needs to
-  cover.
+  complete. Reviewer confirmed 2026-09-06: **Vanguard Captive Management**,
+  reviewing on a recurring basis "as often as required" rather than a
+  single one-time approval — M5 is still the hard gate before any real
+  applicant data is used, but expect re-review to continue afterward, not
+  just once at the start. See the full blueprint document for what that
+  review needs to cover.
 
 ## Running locally
 
