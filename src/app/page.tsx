@@ -1,16 +1,34 @@
 import Link from "next/link";
+import { auth } from "@/lib/auth";
+import { SignOutButton } from "@/components/SignOutButton";
 
-export default function HomePage() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const session = await auth();
+
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center gap-6 px-4 py-16">
-      <div>
-        <h1 className="text-2xl font-semibold text-slate-900">
-          Commercial Equipment Finance Platform
-        </h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Phase 1 pilot — construction/heavy equipment vertical. See
-          /docs/blueprint.md for scope, data model, and acceptance criteria.
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">
+            Commercial Equipment Finance Platform
+          </h1>
+          <p className="mt-2 text-sm text-slate-500">
+            Phase 1 pilot — construction/heavy equipment vertical. See
+            /docs/blueprint.md for scope, data model, and acceptance criteria.
+          </p>
+        </div>
+        {session ? (
+          <SignOutButton />
+        ) : (
+          <Link
+            href="/login"
+            className="shrink-0 text-sm text-slate-500 underline underline-offset-2 hover:text-slate-900"
+          >
+            Sign in
+          </Link>
+        )}
       </div>
       <div className="grid gap-3 sm:grid-cols-3">
         <HomeCard

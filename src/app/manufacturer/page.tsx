@@ -1,6 +1,10 @@
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessManufacturerDashboard } from "@/lib/access-control";
+import { SignOutButton } from "@/components/SignOutButton";
 
 export const dynamic = "force-dynamic";
 
@@ -12,8 +16,15 @@ export const dynamic = "force-dynamic";
  * standing in for the real coverage/completeness measurement this platform
  * still needs an independent denominator to compute (Blueprint §2.5) — it
  * is not itself the Coverage metric, just a visibility placeholder for it.
+ * Behind MANUFACTURER-role login (added 2026-09-06) — this role only ever
+ * gets this aggregate view, never a dealer's guarantor/individual PII (the
+ * queries below already only touch Dealer/Application/FinancingProgram
+ * rows, never Guarantor or IndividualApplicant).
  */
 export default async function ManufacturerDashboardPage() {
+  const session = await auth();
+  if (!canAccessManufacturerDashboard(session)) notFound();
+
   const manufacturer = await getCurrentManufacturer();
 
   const dealers = await prisma.dealer.findMany({
@@ -38,8 +49,13 @@ export default async function ManufacturerDashboardPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-10">
-      <p className="text-sm font-medium text-slate-500">{manufacturer.name}</p>
-      <h1 className="mt-1 text-2xl font-semibold text-slate-900">Network overview</h1>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{manufacturer.name}</p>
+          <h1 className="mt-1 text-2xl font-semibold text-slate-900">Network overview</h1>
+        </div>
+        <SignOutButton />
+      </div>
 
       <div className="mt-6 grid grid-cols-4 gap-4">
         <SummaryTile label="Total applications" value={allApplications.length.toString()} />

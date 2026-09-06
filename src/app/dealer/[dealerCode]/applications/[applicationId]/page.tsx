@@ -1,17 +1,22 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessDealer } from "@/lib/access-control";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApplicationOpsPanel } from "@/components/ApplicationOpsPanel";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Application detail / operator screen. This is where a dealer or platform
- * operator manually logs lender submissions and decisions, and confirms
- * acceptance and funding — Phase 1 has no live lender API, so every one of
- * these lifecycle transitions is a manual data-entry action here
- * (Blueprint §2.1, §2.4), not something the applicant's own form triggers.
+ * Application detail / operator screen. This is where a dealer manually
+ * logs lender submissions and decisions, and confirms acceptance and
+ * funding — Phase 1 has no live lender API, so every one of these lifecycle
+ * transitions is a manual data-entry action here (Blueprint §2.1, §2.4),
+ * not something the applicant's own form triggers. Behind dealer-user login
+ * (added 2026-09-06) scoped to this specific dealer — see
+ * src/lib/access-control.ts; every POST this page's ops panel calls
+ * enforces the same scoping server-side, not just this page render.
  */
 export default async function ApplicationDetailPage({
   params,
@@ -25,6 +30,9 @@ export default async function ApplicationDetailPage({
     where: { manufacturerId_code: { manufacturerId: manufacturer.id, code: dealerCode } },
   });
   if (!dealer) notFound();
+
+  const session = await auth();
+  if (!canAccessDealer(session, dealer.id)) notFound();
 
   const application = await prisma.application.findFirst({
     where: { id: applicationId, dealerId: dealer.id },

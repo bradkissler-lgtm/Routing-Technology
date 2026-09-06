@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessDealer } from "@/lib/access-control";
 import { applicationIntakeSchema, type ApplicationIntakeInput } from "@/lib/validation";
 import { recordAuditEvent } from "@/lib/audit-log";
 import type { Prisma } from "@prisma/client";
@@ -46,6 +48,11 @@ export async function POST(request: NextRequest) {
       { error: `Unknown or inactive dealer code "${input.dealerCode}"` },
       { status: 404 },
     );
+  }
+
+  const session = await auth();
+  if (!canAccessDealer(session, dealer.id)) {
+    return NextResponse.json({ error: "Not authorized for this dealer" }, { status: 403 });
   }
 
   const result =

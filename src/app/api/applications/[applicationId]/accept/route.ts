@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessDealer } from "@/lib/access-control";
 import { acceptOfferInputSchema } from "@/lib/validation";
 import { recordAuditEvent } from "@/lib/audit-log";
 import { recomputeApplicationStatus } from "@/lib/lifecycle";
@@ -45,6 +47,11 @@ export async function POST(
       { error: "This application already has an accepted offer" },
       { status: 409 },
     );
+  }
+
+  const session = await auth();
+  if (!canAccessDealer(session, application.dealerId)) {
+    return NextResponse.json({ error: "Not authorized for this dealer" }, { status: 403 });
   }
 
   const decision = await prisma.decision.findFirst({

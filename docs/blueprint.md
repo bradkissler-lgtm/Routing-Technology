@@ -139,6 +139,48 @@ permissible purpose intact. Treat this as a real feature to build (a
 per-manufacturer access policy setting) once a specific manufacturer needs
 it — not as something to design speculatively now.
 
+## Authentication (added 2026-09-06)
+
+Every page and API route that touches applicant/guarantor data or lifecycle
+actions is now behind login — closing the gap this file used to list first
+under "Known limitations." Two roles, matching the two access levels the
+rest of this document already defines:
+
+- **`DEALER`** — scoped to exactly one `Dealer.id` (`User.dealerId`). Can
+  use that dealer's intake form and lifecycle-ops screen
+  (`/apply/[dealerCode]`, `/dealer/[dealerCode]`, `/dealer/[dealerCode]/
+  applications/[applicationId]`), and the API routes those screens call
+  (intake, lender submission, decision, accept, fund, bureau pull) — never
+  another dealer's, even while authenticated. "Platform operator" logging
+  (Blueprint §2.1/§2.4's phrase for who enters lifecycle data) is modeled
+  as this same `DEALER` role for now; a separate cross-dealer operator role
+  isn't modeled — build it only if Strada staff actually need to log
+  entries on a dealer's behalf, per the blueprint's general pattern of not
+  designing speculatively ahead of a real need.
+- **`MANUFACTURER`** — whole-tenant, aggregate-only: the existing
+  `/manufacturer` dashboard, and nothing else. This role can never reach a
+  dealer's screens, matching the manufacturer-role data-access policy
+  above — the dashboard's own queries already never touched
+  `Guarantor`/`IndividualApplicant` rows, and now no `MANUFACTURER` session
+  can reach the pages that do.
+
+Mechanics: `src/lib/auth.ts` (next-auth / Auth.js v5, Credentials provider,
+bcrypt-hashed passwords, JWT sessions — no database session storage
+needed). `src/proxy.ts` requires a session for every request under
+`/apply`, `/dealer`, `/manufacturer`, `/api/applications`, and
+`/api/submissions`, redirecting to `/login` otherwise; it only checks "is
+anyone logged in," since matching a `DEALER` session to the *right*
+dealer needs a database lookup a proxy doesn't have. That per-dealer (and
+per-role) scoping happens in each page/route handler via
+`src/lib/access-control.ts` (`canAccessDealer`, `canAccessManufacturerDashboard`
+— pure functions, unit tested directly).
+
+**Known gaps, deliberate for Phase 1, not oversights:** no SSO, no
+password reset, no MFA, no rate limiting on login attempts. `npm run
+db:seed` creates one `DEALER` login per seeded dealer plus one
+`MANUFACTURER` login — see `README.md` for the actual demo credentials.
+Never reuse a shared demo password outside local development.
+
 ## Application lifecycle status derivation
 
 `src/lib/application-status.ts` is a pure function (`deriveApplicationStatus`)
@@ -166,9 +208,11 @@ Every one of these is a Phase 1 scope boundary (see the blueprint's
 
 ## Known limitations
 
-- **No authentication.** Every page and API route here is open. This is
-  now the sole hard gate before any pilot with real applicant data — see
-  the M5 status directly below. Auth is the most important remaining gap.
+- **Authentication: implemented 2026-09-06.** See "Authentication" above
+  for the `DEALER`/`MANUFACTURER` role model and scoping. What's still
+  genuinely missing, and a real gap for a production pilot rather than
+  Phase 1 scope: no SSO, no password reset, no MFA, no login-attempt rate
+  limiting.
 - **Single-tenant**, same as the previous prototype — resolves to one
   seeded manufacturer via `DEMO_MANUFACTURER_SLUG`.
 - **No DMS integration, no automated reconciliation job.** Both are manual
@@ -176,19 +220,28 @@ Every one of these is a Phase 1 scope boundary (see the blueprint's
 - **Legal/compliance sign-off (M5): CLEARED 2026-09-06.** **Vanguard
   Captive Management** reviewed the data-rights matrix, retention design,
   and the `BureauPull` exception, and accepted the model unconditionally.
-  M5 is satisfied — the remaining hard gate before real applicant data is
-  authentication (above), not legal review. Vanguard's review continues on
-  a recurring basis "as often as required" going forward, not as a
-  one-time approval; any future schema or data-handling change that
-  touches the data-rights matrix or the `BureauPull` path should go back
-  to them, not be assumed still covered by this sign-off.
+  Vanguard's review continues on a recurring basis "as often as required"
+  going forward, not as a one-time approval; any future schema or
+  data-handling change that touches the data-rights matrix or the
+  `BureauPull` path should go back to them, not be assumed still covered
+  by this sign-off.
+
+Both hard gates named throughout the blueprint document (M5 and
+authentication) are now cleared — see "Before you build on this" and the
+full blueprint document's "Dependencies Required Before Using Real
+Applicant Data" (§3.3) for what's still genuinely missing beyond these
+two before a real pilot: a data-processing agreement per manufacturer, a
+security control review, and the residual auth gaps above.
 
 ## Running locally
 
-Same as the previous prototype — see `README.md`. The seed data now
-reflects the construction/heavy-equipment vertical: three dealers, two
-lenders (`Ridgeline Capital` captive, `Summit National Bank` third-party),
-one financing program each. Visiting `/apply/<dealerCode>` now presents a
+Same as the previous prototype — see `README.md`, including the demo
+logins `npm run db:seed` creates (one `DEALER` account per seeded dealer,
+one `MANUFACTURER` account). Every dealer/manufacturer route now requires
+signing in at `/login` first. The seed data reflects the
+construction/heavy-equipment vertical: three dealers, two lenders
+(`Ridgeline Capital` captive, `Summit National Bank` third-party), one
+financing program each. Visiting `/apply/<dealerCode>` now presents a
 choice between the business and individual intake paths
 (`ApplicantTypeSelector`); both post to the same `/api/applications`
 endpoint with a different `applicantType` discriminator.

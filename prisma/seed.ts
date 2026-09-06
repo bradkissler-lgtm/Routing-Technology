@@ -1,6 +1,13 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
+
+// Demo-only password for every seeded login — never use a shared, hardcoded
+// password like this outside local development (see docs/blueprint.md,
+// "Known limitations" for the real gaps: no password reset, no MFA, no
+// rate limiting).
+const DEMO_PASSWORD = "demo-password-2026";
 
 // Seeds one demo manufacturer in the construction/heavy-equipment vertical
 // with a small dealer network and two lenders (one captive program, one
@@ -24,8 +31,9 @@ async function main() {
     { code: "DLR-003", name: "Ironline Equipment Sales", contactEmail: "finance@ironline.example.com" },
   ];
 
+  const createdDealers = [];
   for (const dealer of dealers) {
-    await prisma.dealer.upsert({
+    const created = await prisma.dealer.upsert({
       where: {
         manufacturerId_code: {
           manufacturerId: manufacturer.id,
@@ -40,6 +48,7 @@ async function main() {
         contactEmail: dealer.contactEmail,
       },
     });
+    createdDealers.push(created);
   }
 
   // Two lenders, demonstrating Lender vs. FinancingProgram as separate
@@ -80,8 +89,45 @@ async function main() {
     },
   });
 
+  // One DEALER-role user per seeded dealer (scoped to that dealer only —
+  // see prisma/schema.prisma, model User) plus one MANUFACTURER-role user
+  // for the aggregate dashboard. All demo accounts share DEMO_PASSWORD;
+  // never do this outside local development.
+  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+
+  for (const dealer of createdDealers) {
+    const email = `${dealer.code.toLowerCase()}@demo.local`;
+    await prisma.user.upsert({
+      where: { email },
+      update: {},
+      create: {
+        manufacturerId: manufacturer.id,
+        email,
+        passwordHash,
+        role: "DEALER",
+        dealerId: dealer.id,
+      },
+    });
+  }
+
+  await prisma.user.upsert({
+    where: { email: "manufacturer@demo.local" },
+    update: {},
+    create: {
+      manufacturerId: manufacturer.id,
+      email: "manufacturer@demo.local",
+      passwordHash,
+      role: "MANUFACTURER",
+    },
+  });
+
   console.log(
     `Seeded manufacturer "${manufacturer.name}" with ${dealers.length} dealers and 2 lender programs.`,
+  );
+  console.log(
+    `Demo logins (password "${DEMO_PASSWORD}" for all): ` +
+      createdDealers.map((d) => `${d.code.toLowerCase()}@demo.local`).join(", ") +
+      ", manufacturer@demo.local",
   );
 }
 

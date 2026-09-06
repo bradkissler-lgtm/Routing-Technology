@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessDealer } from "@/lib/access-control";
 import { ApplicantTypeSelector } from "@/components/ApplicantTypeSelector";
 
 export const dynamic = "force-dynamic";
@@ -9,10 +11,11 @@ export const dynamic = "force-dynamic";
  * Dealer-facing intake — commercial (business applicant) and consumer
  * (individual applicant) ship together in V1 (Blueprint §2.1, updated
  * 2026-09-06); ApplicantTypeSelector lets the visitor choose which applies.
- * No auth yet (see /docs/blueprint.md, "Known limitations") — a real
- * deployment puts this behind dealer-user login, which matters more here
- * than it did for the earlier consumer-only prototype since real business,
- * individual, and guarantor/co-signer PII all flow through this form.
+ * Behind dealer-user login (added 2026-09-06, closing the gap noted in
+ * /docs/blueprint.md, "Known limitations") — src/proxy.ts already requires
+ * a session to reach this route; the check below additionally confirms the
+ * session's own dealer matches this specific dealerCode, since a dealer
+ * user for one dealer must never see or submit into another dealer's data.
  */
 export default async function ApplyPage({
   params,
@@ -27,6 +30,11 @@ export default async function ApplyPage({
   });
 
   if (!dealer || !dealer.isActive) {
+    notFound();
+  }
+
+  const session = await auth();
+  if (!canAccessDealer(session, dealer.id)) {
     notFound();
   }
 

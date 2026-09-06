@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessDealer } from "@/lib/access-control";
 import { bureauPullInputSchema } from "@/lib/validation";
 import { recordAuditEvent } from "@/lib/audit-log";
 
@@ -44,6 +46,11 @@ export async function POST(
   });
   if (!application) {
     return NextResponse.json({ error: "Application not found" }, { status: 404 });
+  }
+
+  const session = await auth();
+  if (!canAccessDealer(session, application.dealerId)) {
+    return NextResponse.json({ error: "Not authorized for this dealer" }, { status: 403 });
   }
 
   if (input.participantType === "GUARANTOR") {

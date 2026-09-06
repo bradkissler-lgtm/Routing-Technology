@@ -2,15 +2,19 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
+import { auth } from "@/lib/auth";
+import { canAccessDealer } from "@/lib/access-control";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SignOutButton } from "@/components/SignOutButton";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Dealer console (read-only list, no auth yet). Links into each
- * application's detail page, where lender submissions, decisions,
- * acceptance, and funding are logged manually (Blueprint §2.1, §2.4 — no
- * live lender API in Phase 1).
+ * Dealer console. Behind dealer-user login (added 2026-09-06) — a dealer
+ * session only ever matches its own Dealer.id, never another dealer's; see
+ * src/lib/access-control.ts. Links into each application's detail page,
+ * where lender submissions, decisions, acceptance, and funding are logged
+ * manually (Blueprint §2.1, §2.4 — no live lender API in Phase 1).
  */
 export default async function DealerPage({
   params,
@@ -25,6 +29,9 @@ export default async function DealerPage({
   });
   if (!dealer) notFound();
 
+  const session = await auth();
+  if (!canAccessDealer(session, dealer.id)) notFound();
+
   const applications = await prisma.application.findMany({
     where: { dealerId: dealer.id },
     orderBy: { createdAt: "desc" },
@@ -38,9 +45,14 @@ export default async function DealerPage({
 
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
-      <p className="text-sm font-medium text-slate-500">{manufacturer.name}</p>
-      <h1 className="mt-1 text-2xl font-semibold text-slate-900">{dealer.name}</h1>
-      <p className="mt-1 text-sm text-slate-500">Dealer code {dealer.code}</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{manufacturer.name}</p>
+          <h1 className="mt-1 text-2xl font-semibold text-slate-900">{dealer.name}</h1>
+          <p className="mt-1 text-sm text-slate-500">Dealer code {dealer.code}</p>
+        </div>
+        <SignOutButton />
+      </div>
 
       <div className="mt-6 grid grid-cols-4 gap-4">
         <StatTile label="Applications" value={applications.length.toString()} />
