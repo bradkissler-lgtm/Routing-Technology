@@ -100,12 +100,12 @@ conduit passing an application to a lender who then has permissible
 purpose on their own account. The applicant's or guarantor's existing
 `CREDIT_PULL` consent is the permissible-purpose basis for it (the same
 consent that would otherwise authorize the lender's downstream pull, not
-a second consent to collect) — confirm this reading is in scope for the
-recurring legal review (see "Known limitations," M5) before relying on it
-with real applicant data. `/api/applications/[applicationId]/bureau-pull`
-enforces that only a `Guarantor` or `IndividualApplicant` with `CREDIT_PULL`
-consent already on file can be logged this way — never a `BusinessApplicant`,
-which is never a consumer-report subject.
+a second consent to collect). Vanguard Captive Management's M5 review
+(see "Known limitations") covered this reading and accepted it.
+`/api/applications/[applicationId]/bureau-pull` enforces that only a
+`Guarantor` or `IndividualApplicant` with `CREDIT_PULL` consent already on
+file can be logged this way — never a `BusinessApplicant`, which is never
+a consumer-report subject.
 
 ## Manufacturer's role and data access (per-tenant, resolved 2026-09-06)
 
@@ -166,27 +166,22 @@ Every one of these is a Phase 1 scope boundary (see the blueprint's
 
 ## Known limitations
 
-- **No authentication.** Every page and API route here is open. This
-  matters more than it did for the previous consumer prototype, since real
-  business and guarantor PII flows through this form — auth is the most
-  important gap before any pilot with real data.
+- **No authentication.** Every page and API route here is open. This is
+  now the sole hard gate before any pilot with real applicant data — see
+  the M5 status directly below. Auth is the most important remaining gap.
 - **Single-tenant**, same as the previous prototype — resolves to one
   seeded manufacturer via `DEMO_MANUFACTURER_SLUG`.
 - **No DMS integration, no automated reconciliation job.** Both are manual
   processes for Phase 1.
-- **No legal/compliance sign-off has happened yet.** This code must not be
-  used with real applicant data until that review (the blueprint's M5) is
-  complete. Reviewer confirmed 2026-09-06: **Vanguard Captive Management**,
-  reviewing on a recurring basis "as often as required" rather than a
-  single one-time approval — M5 is still the hard gate before any real
-  applicant data is used, but expect re-review to continue afterward, not
-  just once at the start. See the full blueprint document for what that
-  review needs to cover. **Added scope as of the same date:** the review
-  must explicitly cover the `BureauPull` exception above — the platform
-  acting as its own "user" of a consumer report for routing purposes is a
-  different FCRA posture than the default (lender pulls, lender has
-  permissible purpose), and needs its own sign-off before any real FICO
-  pull happens through this path.
+- **Legal/compliance sign-off (M5): CLEARED 2026-09-06.** **Vanguard
+  Captive Management** reviewed the data-rights matrix, retention design,
+  and the `BureauPull` exception, and accepted the model unconditionally.
+  M5 is satisfied — the remaining hard gate before real applicant data is
+  authentication (above), not legal review. Vanguard's review continues on
+  a recurring basis "as often as required" going forward, not as a
+  one-time approval; any future schema or data-handling change that
+  touches the data-rights matrix or the `BureauPull` path should go back
+  to them, not be assumed still covered by this sign-off.
 
 ## Running locally
 

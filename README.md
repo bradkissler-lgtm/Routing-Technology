@@ -12,9 +12,10 @@ single manufacturer, manual lender-submission and decision logging (no live
 bureau pull or lender API, outside one rare routing-rule exception — see
 docs/blueprint.md), no auth yet. This branch supersedes the
 consumer-only prototype on `main` — see `docs/blueprint.md`, "What changed
-from the original prototype." **Do not use with real applicant data** until
-the legal/compliance review described in the full blueprint document is
-complete.
+from the original prototype." Legal/compliance review (M5, Vanguard
+Captive Management) is cleared as of 2026-09-06. **Do not use with real
+applicant data** until authentication is added — see `docs/blueprint.md`,
+"Known limitations."
 
 ## Stack
 
