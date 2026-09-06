@@ -54,6 +54,38 @@ credit pull must not persist it in this database — route it through a
 PCI/GLBA-compliant vault and store only a reference. See the comment
 directly above `model Guarantor` in the schema.
 
+## Manufacturer's role and data access (per-tenant, resolved 2026-09-06)
+
+Whether a participating manufacturer is itself a lender (via a captive
+finance arm) or strictly a referral partner with no lending role **varies
+by manufacturer** and is not fixed platform-wide. The schema already
+supports this at the program level — `FinancingProgram.type` is `CAPTIVE`
+or `THIRD_PARTY` per program, not a platform-wide setting — but that's a
+labeling distinction, not an access-control policy.
+
+Until a specific manufacturer's role is confirmed at onboarding, the
+default is the conservative reading: **every manufacturer is treated as a
+neutral referral partner.** In practice, that means manufacturer-facing
+code (`src/app/manufacturer/page.tsx`) should only ever surface aggregate
+figures — approval rates, volumes, dealer/lender performance — and never
+raw guarantor PII or consumer-report data, regardless of whether a given
+program is captive or third-party. This already holds in the current
+code: the manufacturer dashboard queries dealers/programs and their
+application/decision counts, never `Guarantor` rows directly; only the
+dealer-facing application detail page (`/dealer/[dealerCode]/applications/
+[applicationId]`) reads guarantor fields.
+
+A manufacturer whose captive arm has a documented, reviewed compliance
+basis (structurally similar to Ford Motor Credit or John Deere Financial —
+a separately regulated lending entity under common ownership with the
+manufacturer's brand/marketing side) may warrant broader access for that
+entity specifically, but that expansion is an onboarding decision made
+per manufacturer, not a platform-wide default, and it should be paired with
+whatever operational/legal separation keeps the captive entity's
+permissible purpose intact. Treat this as a real feature to build (a
+per-manufacturer access policy setting) once a specific manufacturer needs
+it — not as something to design speculatively now.
+
 ## Application lifecycle status derivation
 
 `src/lib/application-status.ts` is a pure function (`deriveApplicationStatus`)
