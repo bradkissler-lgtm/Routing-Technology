@@ -1,16 +1,18 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentManufacturer } from "@/lib/manufacturer";
-import { IntakeForm } from "@/components/IntakeForm";
+import { ApplicantTypeSelector } from "@/components/ApplicantTypeSelector";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Dealer-facing intake for a commercial equipment financing application.
- * No auth yet (see /docs/architecture.md, "Known limitations") — a real
+ * Dealer-facing intake — commercial (business applicant) and consumer
+ * (individual applicant) ship together in V1 (Blueprint §2.1, updated
+ * 2026-09-06); ApplicantTypeSelector lets the visitor choose which applies.
+ * No auth yet (see /docs/blueprint.md, "Known limitations") — a real
  * deployment puts this behind dealer-user login, which matters more here
- * than it did for the earlier consumer prototype since real business and
- * guarantor PII flows through this form.
+ * than it did for the earlier consumer-only prototype since real business,
+ * individual, and guarantor/co-signer PII all flow through this form.
  */
 export default async function ApplyPage({
   params,
@@ -38,10 +40,11 @@ export default async function ApplyPage({
           Apply for financing at {dealer.name}
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          For the business, its owners, and anyone personally guaranteeing this financing.
+          For a business (with its owners and a guarantor) or an individual applicant (with an
+          optional co-signer).
         </p>
       </div>
-      <IntakeForm dealerCode={dealer.code} />
+      <ApplicantTypeSelector dealerCode={dealer.code} />
     </main>
   );
 }

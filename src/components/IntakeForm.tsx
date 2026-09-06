@@ -79,6 +79,7 @@ export function IntakeForm({ dealerCode }: { dealerCode: string }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          applicantType: "BUSINESS",
           dealerCode,
           business: {
             legalName: business.legalName,

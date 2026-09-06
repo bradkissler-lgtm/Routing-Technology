@@ -30,6 +30,7 @@ export default async function ApplicationDetailPage({
     where: { id: applicationId, dealerId: dealer.id },
     include: {
       businessApplicant: { include: { owners: true } },
+      individualApplicant: true,
       guarantors: true,
       lenderSubmissions: {
         include: { financingProgram: { include: { lender: true } }, decision: true },
@@ -50,7 +51,10 @@ export default async function ApplicationDetailPage({
       <p className="text-sm font-medium text-slate-500">{dealer.name}</p>
       <div className="mt-1 flex items-center gap-3">
         <h1 className="text-2xl font-semibold text-slate-900">
-          {application.businessApplicant?.legalName ?? "Application"}
+          {application.businessApplicant?.legalName ??
+            (application.individualApplicant
+              ? `${application.individualApplicant.firstName} ${application.individualApplicant.lastName}`
+              : "Application")}
         </h1>
         <StatusBadge status={application.status} />
       </div>
@@ -59,19 +63,41 @@ export default async function ApplicationDetailPage({
       </p>
 
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-slate-900">Owners</h2>
-        <ul className="mt-2 space-y-1 text-sm text-slate-700">
-          {application.businessApplicant?.owners.map((owner) => (
-            <li key={owner.id}>
-              {owner.firstName} {owner.lastName}
-              {owner.title ? ` — ${owner.title}` : ""}
-              {owner.ownershipPercent ? ` (${owner.ownershipPercent}%)` : ""}
-            </li>
-          ))}
-        </ul>
+        {application.businessApplicant && (
+          <>
+            <h2 className="text-sm font-semibold text-slate-900">Owners</h2>
+            <ul className="mt-2 space-y-1 text-sm text-slate-700">
+              {application.businessApplicant.owners.map((owner) => (
+                <li key={owner.id}>
+                  {owner.firstName} {owner.lastName}
+                  {owner.title ? ` — ${owner.title}` : ""}
+                  {owner.ownershipPercent ? ` (${owner.ownershipPercent}%)` : ""}
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
 
-        <h2 className="mt-4 text-sm font-semibold text-slate-900">Guarantors</h2>
+        {application.individualApplicant && (
+          <>
+            <h2 className="text-sm font-semibold text-slate-900">Applicant</h2>
+            <p className="mt-2 text-sm text-slate-700">
+              {application.individualApplicant.firstName} {application.individualApplicant.lastName}
+              {" · "}SSN ending {application.individualApplicant.ssnLast4}
+              {" · "}{application.individualApplicant.email}
+            </p>
+          </>
+        )}
+
+        <h2 className="mt-4 text-sm font-semibold text-slate-900">
+          {application.businessApplicant ? "Guarantors" : "Co-signer"}
+        </h2>
         <ul className="mt-2 space-y-1 text-sm text-slate-700">
+          {application.guarantors.length === 0 && (
+            <li className="text-slate-400">
+              {application.businessApplicant ? "None on file." : "No co-signer on this application."}
+            </li>
+          )}
           {application.guarantors.map((g) => (
             <li key={g.id}>
               {g.firstName} {g.lastName} · SSN ending {g.ssnLast4} ·{" "}

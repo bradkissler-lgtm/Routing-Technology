@@ -143,9 +143,18 @@ model Owner {
 }
 
 // ---------------------------------------------------------------------------
-// Individual applicants — Phase 2 (consumer mode). Modeled now so the
-// schema doesn't need a breaking change when Phase 2 ships (Blueprint,
-// Confirmed Operating Parameters: "phased, both").
+// Individual applicants — consumer financing, ships alongside commercial in
+// V1 (updated 2026-09-06; originally modeled schema-only for a later phase,
+// that deferral is superseded — see /docs/blueprint.md).
+//
+// Unlike a BusinessApplicant, an IndividualApplicant IS credit-pulled
+// directly — the applicant themselves, not just an optional guarantor/
+// co-signer — so ssnLast4 carries the same FCRA/consumer-report caveat as
+// Guarantor.ssnLast4 above: only the last 4 digits are stored; a live
+// deployment must route a full SSN through a PCI/GLBA-compliant vault, not
+// this table. Consent (including the required credit-pull authorization)
+// is recorded via ConsentRecord with participantType INDIVIDUAL, mirroring
+// how BusinessApplicant consent works — no separate consent fields here.
 // ---------------------------------------------------------------------------
 
 model IndividualApplicant {
@@ -159,6 +168,7 @@ model IndividualApplicant {
   city           String
   state          String
   postalCode     String
+  ssnLast4       String
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

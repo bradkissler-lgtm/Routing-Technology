@@ -18,9 +18,22 @@ manufacturer should hold data it may have no legal basis to hold. This
 rebuild implements the corrected model:
 
 - **Participants are distinct types**, not one undifferentiated "buyer":
-  `BusinessApplicant`, `Owner`, `Guarantor`, and (schema-only, Phase 2)
-  `IndividualApplicant`. A `Lender` is separate from the `FinancingProgram`
-  it runs — a lender can run several programs, captive or third-party.
+  `BusinessApplicant`, `Owner`, `Guarantor`, and `IndividualApplicant`. A
+  `Lender` is separate from the `FinancingProgram` it runs — a lender can
+  run several programs, captive or third-party.
+- **Commercial and consumer ship together in V1** (updated 2026-09-06 —
+  originally phased, that deferral is superseded). `IndividualApplicant`
+  is a fully working intake path now, not schema-only: an individual
+  applicant is credit-pulled directly (unlike a business, which never is),
+  so `IndividualApplicant.ssnLast4` and their own `CREDIT_PULL` consent are
+  required, same as a `Guarantor`'s. An individual application can also
+  have an optional co-signer, using the same `Guarantor` entity as the
+  commercial path's guarantors. The expectation for V1 OEMs: it's fine to
+  start as a pure bank-referral OEM (every application routed to a
+  third-party lender, no captive arm), but the platform must accommodate
+  an OEM that wants to run its own captive financing later without an
+  architecture change — the `Lender`/`FinancingProgram` split already
+  supports that per program, independent of applicant type.
 - **The application lifecycle is five stages, not one record**:
   `Application` → `LenderSubmission` (one per lender tried — a cascade
   produces several) → `Decision` (one per submission) → `AcceptedOffer`
@@ -43,16 +56,28 @@ rebuild implements the corrected model:
 
 See `prisma/schema.prisma` — read it directly, this is a summary only.
 Core entities: `Manufacturer`, `Dealer`, `Lender`, `FinancingProgram`,
-`BusinessApplicant`, `Owner`, `IndividualApplicant` (Phase 2, unused by any
-route yet), `Guarantor`, `Application`, `LenderSubmission`, `Decision`,
-`AcceptedOffer`, `FundedTransaction`, `ConsentRecord`, `AuditLogEntry`,
-`DataRetentionEvent`.
+`BusinessApplicant`, `Owner`, `IndividualApplicant`, `Guarantor`,
+`Application`, `LenderSubmission`, `Decision`, `AcceptedOffer`,
+`FundedTransaction`, `ConsentRecord`, `AuditLogEntry`, `DataRetentionEvent`.
 
-`Guarantor.ssnLast4` is the only SSN fragment stored, matching the previous
-prototype's approach. A live deployment that needs a full SSN for an actual
-credit pull must not persist it in this database — route it through a
-PCI/GLBA-compliant vault and store only a reference. See the comment
-directly above `model Guarantor` in the schema.
+`Guarantor.ssnLast4` and `IndividualApplicant.ssnLast4` are the only SSN
+fragments stored — both required, since both entities are directly
+credit-pulled by a lender. A `BusinessApplicant` and an `Owner` never carry
+an SSN field: a business isn't a consumer-report subject, and an owner
+only becomes one if they're also captured as a `Guarantor`. A live
+deployment that needs a full SSN for an actual credit pull must not
+persist it in this database for any of these entities — route it through
+a PCI/GLBA-compliant vault and store only a reference. See the comments
+directly above `model Guarantor` and `model IndividualApplicant` in the
+schema.
+
+Routing and decisioning stay entirely external in Phase 1: the platform
+never performs a credit-bureau pull itself. `LenderSubmission` records
+that an application was routed to a specific lender; the lender pulls
+credit (or not) and decides on their own systems; `Decision` is a manual
+record of that external outcome. SSN capture here is for consent/reference
+and to accompany the routed application, not for this platform to query a
+bureau with.
 
 ## Manufacturer's role and data access (per-tenant, resolved 2026-09-06)
 
@@ -135,4 +160,7 @@ Every one of these is a Phase 1 scope boundary (see the blueprint's
 Same as the previous prototype — see `README.md`. The seed data now
 reflects the construction/heavy-equipment vertical: three dealers, two
 lenders (`Ridgeline Capital` captive, `Summit National Bank` third-party),
-one financing program each.
+one financing program each. Visiting `/apply/<dealerCode>` now presents a
+choice between the business and individual intake paths
+(`ApplicantTypeSelector`); both post to the same `/api/applications`
+endpoint with a different `applicantType` discriminator.

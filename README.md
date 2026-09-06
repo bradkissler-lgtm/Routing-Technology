@@ -1,7 +1,8 @@
 # Commercial Equipment Finance Platform
 
-A platform for capturing commercial equipment financing applications
-(business applicant, owners, personal guarantors), logging lender
+A platform for capturing equipment financing applications — commercial
+(business applicant, owners, personal guarantors) and consumer (individual
+applicant, optional co-signer) both ship together in V1 — logging lender
 submissions and decisions, and reporting on dealer and lender/program
 performance. See [`docs/blueprint.md`](docs/blueprint.md) for the full data
 model, lifecycle design, and the reasoning behind this rebuild.
@@ -9,7 +10,7 @@ model, lifecycle design, and the reasoning behind this rebuild.
 **Status:** Phase 1 pilot build. Construction/heavy-equipment vertical,
 single manufacturer, manual lender-submission and decision logging (no live
 bureau pull or lender API), no auth yet. This branch supersedes the
-consumer-buyer prototype on `main` — see `docs/blueprint.md`, "What changed
+consumer-only prototype on `main` — see `docs/blueprint.md`, "What changed
 from the original prototype." **Do not use with real applicant data** until
 the legal/compliance review described in the full blueprint document is
 complete.
@@ -61,7 +62,8 @@ the data model and application logic, not the technology choices.
 
    Then visit:
    - `http://localhost:3000/` — links to all three surfaces below
-   - `http://localhost:3000/apply/DLR-001` — business/owner/guarantor intake
+   - `http://localhost:3000/apply/DLR-001` — choose business or individual
+     intake (`ApplicantTypeSelector`), then complete either flow
    - `http://localhost:3000/dealer/DLR-001` — that dealer's applications
    - `http://localhost:3000/dealer/DLR-001/applications/<id>` — an
      application's detail page, where lender submissions, decisions,
@@ -89,16 +91,17 @@ prisma/
   seed.ts                # demo data (construction/heavy equipment vertical)
 src/
   app/
-    apply/[dealerCode]/                              # business/owner/guarantor intake (public)
+    apply/[dealerCode]/                              # business or individual intake (public)
     dealer/[dealerCode]/                              # dealer application list (no auth yet)
     dealer/[dealerCode]/applications/[applicationId]/ # manual lifecycle ops screen
     manufacturer/                                      # network dashboard (no auth yet)
-    api/applications/                                  # intake endpoint
+    api/applications/                                  # intake endpoint (both applicant types)
     api/applications/[id]/submissions/                 # log a lender submission
     api/submissions/[id]/decision/                     # record a decision
     api/applications/[id]/accept/                      # accept an offer
     api/applications/[id]/fund/                        # confirm funding
-  components/            # IntakeForm, ApplicationOpsPanel, StatusBadge
+  components/            # ApplicantTypeSelector, IntakeForm (business),
+                          # IndividualIntakeForm (consumer), ApplicationOpsPanel, StatusBadge
   lib/
     application-status.ts # pure lifecycle-status derivation (unit tested)
     lifecycle.ts            # recomputes + persists Application.status
