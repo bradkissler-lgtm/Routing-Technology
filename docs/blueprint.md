@@ -230,8 +230,14 @@ Both hard gates named throughout the blueprint document (M5 and
 authentication) are now cleared — see "Before you build on this" and the
 full blueprint document's "Dependencies Required Before Using Real
 Applicant Data" (§3.3) for what's still genuinely missing beyond these
-two before a real pilot: a data-processing agreement per manufacturer, a
-security control review, and the residual auth gaps above.
+two before a real pilot: a data-processing agreement per manufacturer,
+and the residual auth gaps above. **Determined 2026-09-06: a separate
+security control review is not required for the current scope** — the
+platform owner's call, not a review that ran and passed; §3.3's
+Safeguards-Rule-aligned bullet is removed on that basis. Revisit this
+determination if the deployment's scope changes (e.g., a live bureau-pull
+integration, real hosting infrastructure decisions) in a way that would
+change what "the current scope" means.
 
 ## Running locally
 
