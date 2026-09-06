@@ -16,6 +16,11 @@ interface Option {
  * field for now because there's no auth yet; it exists so the audit trail
  * still records who made each entry.
  */
+interface BureauPullSubject extends Option {
+  participantType: "GUARANTOR" | "INDIVIDUAL";
+  participantId: string;
+}
+
 export function ApplicationOpsPanel({
   applicationId,
   availablePrograms,
@@ -23,6 +28,7 @@ export function ApplicationOpsPanel({
   acceptableDecisions,
   hasAcceptedOffer,
   hasFundedTransaction,
+  bureauPullSubjects,
 }: {
   applicationId: string;
   availablePrograms: Option[];
@@ -30,6 +36,7 @@ export function ApplicationOpsPanel({
   acceptableDecisions: Option[];
   hasAcceptedOffer: boolean;
   hasFundedTransaction: boolean;
+  bureauPullSubjects: BureauPullSubject[];
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +50,12 @@ export function ApplicationOpsPanel({
   const [enteredBy, setEnteredBy] = useState("");
   const [decisionId, setDecisionId] = useState("");
   const [fundedAmount, setFundedAmount] = useState("");
+
+  const [bureauSubjectKey, setBureauSubjectKey] = useState("");
+  const [bureauProgramId, setBureauProgramId] = useState("");
+  const [bureau, setBureau] = useState<"EQUIFAX" | "EXPERIAN" | "TRANSUNION">("EQUIFAX");
+  const [ficoScore, setFicoScore] = useState("");
+  const [bureauPulledBy, setBureauPulledBy] = useState("");
 
   async function post(path: string, body: unknown) {
     setError(null);
@@ -92,6 +105,78 @@ export function ApplicationOpsPanel({
               className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
             >
               Log submission
+            </button>
+          </div>
+        </section>
+      )}
+
+      {bureauPullSubjects.length > 0 && (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <h2 className="text-sm font-semibold text-slate-900">
+            Log a bureau pull <span className="font-normal text-amber-800">(rare — only when a program&rsquo;s routing rule needs a FICO score before submission)</span>
+          </h2>
+          <div className="mt-2 flex flex-col gap-2">
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={bureauSubjectKey}
+              onChange={(e) => setBureauSubjectKey(e.target.value)}
+            >
+              <option value="">Whose credit was pulled?…</option>
+              {bureauPullSubjects.map((s) => (
+                <option key={s.id} value={s.id}>{s.label}</option>
+              ))}
+            </select>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={bureauProgramId}
+              onChange={(e) => setBureauProgramId(e.target.value)}
+            >
+              <option value="">Which program&rsquo;s routing rule required this? (optional)</option>
+              {availablePrograms.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            <select
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={bureau}
+              onChange={(e) => setBureau(e.target.value as typeof bureau)}
+            >
+              <option value="EQUIFAX">Equifax</option>
+              <option value="EXPERIAN">Experian</option>
+              <option value="TRANSUNION">TransUnion</option>
+            </select>
+            <input
+              type="number"
+              min={300}
+              max={850}
+              placeholder="FICO score (optional)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={ficoScore}
+              onChange={(e) => setFicoScore(e.target.value)}
+            />
+            <input
+              placeholder="Pulled by (your name)"
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={bureauPulledBy}
+              onChange={(e) => setBureauPulledBy(e.target.value)}
+            />
+            <button
+              disabled={busy || !bureauSubjectKey || !bureauPulledBy}
+              onClick={() => {
+                const subject = bureauPullSubjects.find((s) => s.id === bureauSubjectKey);
+                if (!subject) return;
+                post(`/api/applications/${applicationId}/bureau-pull`, {
+                  participantType: subject.participantType,
+                  participantId: subject.participantId,
+                  financingProgramId: bureauProgramId || undefined,
+                  bureau,
+                  ficoScore: ficoScore ? Number(ficoScore) : undefined,
+                  pulledBy: bureauPulledBy,
+                });
+              }}
+              className="self-start rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white disabled:opacity-40"
+            >
+              Log bureau pull
             </button>
           </div>
         </section>

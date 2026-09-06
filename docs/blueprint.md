@@ -46,11 +46,17 @@ rebuild implements the corrected model:
   data sharing does not cover an individual guarantor's own credit-pull
   authorization — each guarantor consents separately (`ConsentRecord`,
   one row per participant per purpose).
-- **Phase 1 has no live decisioning.** There is no bureau pull, no lender
-  API, no predictive routing. Every `LenderSubmission` and `Decision` is
-  logged manually by a dealer or platform operator on the application's
-  detail page (`/dealer/[dealerCode]/applications/[applicationId]`). This
-  is deliberate scope, not a missing feature — see "Known limitations."
+- **Phase 1 has no live decisioning, and — outside one rare exception —
+  no bureau pull.** There is no lender API, no predictive routing. Every
+  `LenderSubmission` and `Decision` is logged manually by a dealer or
+  platform operator on the application's detail page
+  (`/dealer/[dealerCode]/applications/[applicationId]`). This is
+  deliberate scope, not a missing feature — see "Known limitations." The
+  one exception: some financing programs' own routing rules need a FICO
+  score to decide whether to even route there (`FinancingProgram.
+  minFicoScore`) — in that rare case, the platform itself pulls the bureau
+  report before submission (`BureauPull`, updated 2026-09-06), logged
+  manually the same way a `Decision` is. See "Bureau pulls" below.
 
 ## Data model
 
@@ -71,13 +77,35 @@ a PCI/GLBA-compliant vault and store only a reference. See the comments
 directly above `model Guarantor` and `model IndividualApplicant` in the
 schema.
 
-Routing and decisioning stay entirely external in Phase 1: the platform
-never performs a credit-bureau pull itself. `LenderSubmission` records
-that an application was routed to a specific lender; the lender pulls
-credit (or not) and decides on their own systems; `Decision` is a manual
-record of that external outcome. SSN capture here is for consent/reference
-and to accompany the routed application, not for this platform to query a
-bureau with.
+Routing and decisioning stay entirely external in Phase 1 as the default
+posture: the platform does not perform a credit-bureau pull itself.
+`LenderSubmission` records that an application was routed to a specific
+lender; the lender pulls credit (or not) and decides on their own
+systems; `Decision` is a manual record of that external outcome. SSN
+capture here is for consent/reference and to accompany the routed
+application, not for this platform to query a bureau with.
+
+**The one exception (corrected 2026-09-06): bureau pulls for routing.**
+Some financing programs' own eligibility rules require knowing a FICO
+score before deciding whether to route there at all —
+`FinancingProgram.minFicoScore`, left null on every program that has no
+such rule (the common case). When it is set, the platform itself is the
+one requesting the report, not the lender — `BureauPull` records this:
+which bureau, the score, which program's rule triggered it, who pulled it
+(Phase 1 has no live bureau API, so this is a manual record of a pull
+performed outside this system, same pattern as `Decision.enteredBy`).
+This is the one place in the schema where the platform operator becomes a
+"user" of consumer reports under FCRA in its own right, not just a
+conduit passing an application to a lender who then has permissible
+purpose on their own account. The applicant's or guarantor's existing
+`CREDIT_PULL` consent is the permissible-purpose basis for it (the same
+consent that would otherwise authorize the lender's downstream pull, not
+a second consent to collect) — confirm this reading is in scope for the
+recurring legal review (see "Known limitations," M5) before relying on it
+with real applicant data. `/api/applications/[applicationId]/bureau-pull`
+enforces that only a `Guarantor` or `IndividualApplicant` with `CREDIT_PULL`
+consent already on file can be logged this way — never a `BusinessApplicant`,
+which is never a consumer-report subject.
 
 ## Manufacturer's role and data access (per-tenant, resolved 2026-09-06)
 
@@ -153,7 +181,12 @@ Every one of these is a Phase 1 scope boundary (see the blueprint's
   single one-time approval — M5 is still the hard gate before any real
   applicant data is used, but expect re-review to continue afterward, not
   just once at the start. See the full blueprint document for what that
-  review needs to cover.
+  review needs to cover. **Added scope as of the same date:** the review
+  must explicitly cover the `BureauPull` exception above — the platform
+  acting as its own "user" of a consumer report for routing purposes is a
+  different FCRA posture than the default (lender pulls, lender has
+  permissible purpose), and needs its own sign-off before any real FICO
+  pull happens through this path.
 
 ## Running locally
 

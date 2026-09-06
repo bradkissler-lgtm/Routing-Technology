@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applicationIntakeSchema } from "../validation";
+import { applicationIntakeSchema, bureauPullInputSchema } from "../validation";
 
 const validBusinessInput = {
   applicantType: "BUSINESS" as const,
@@ -146,5 +146,39 @@ describe("applicationIntakeSchema — individual (consumer) path", () => {
       equipment: { ...validIndividualInput.equipment, requestedAmount: 0 },
     };
     expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
+  });
+});
+
+describe("bureauPullInputSchema — the rare platform-initiated pull", () => {
+  const valid = {
+    participantType: "GUARANTOR" as const,
+    participantId: "guarantor_1",
+    bureau: "EQUIFAX" as const,
+    ficoScore: 720,
+    pulledBy: "Jordan (ops)",
+  };
+
+  it("accepts a well-formed pull with a FICO score", () => {
+    expect(bureauPullInputSchema.parse(valid)).toMatchObject(valid);
+  });
+
+  it("accepts an INDIVIDUAL subject with no financing program named", () => {
+    const input = { ...valid, participantType: "INDIVIDUAL" as const, participantId: "ind_1" };
+    expect(bureauPullInputSchema.parse(input).financingProgramId).toBeUndefined();
+  });
+
+  it("rejects a BUSINESS participant type — a business is never a consumer-report subject", () => {
+    const invalid = { ...valid, participantType: "BUSINESS" };
+    expect(() => bureauPullInputSchema.parse(invalid)).toThrow();
+  });
+
+  it("rejects a FICO score outside the valid 300-850 range", () => {
+    expect(() => bureauPullInputSchema.parse({ ...valid, ficoScore: 250 })).toThrow();
+    expect(() => bureauPullInputSchema.parse({ ...valid, ficoScore: 900 })).toThrow();
+  });
+
+  it("requires recording who pulled it", () => {
+    const invalid = { ...valid, pulledBy: "" };
+    expect(() => bureauPullInputSchema.parse(invalid)).toThrow();
   });
 });

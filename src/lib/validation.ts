@@ -125,6 +125,19 @@ export const decisionInputSchema = z.object({
   termsJson: z.record(z.string(), z.unknown()).optional(),
 });
 
+// Logging a bureau pull — the rare exception where the platform itself
+// requests a credit report (never the ordinary case: see BureauPull's
+// comment in prisma/schema.prisma). Only a GUARANTOR or an INDIVIDUAL can
+// be the subject; a BUSINESS is never a consumer-report subject.
+export const bureauPullInputSchema = z.object({
+  participantType: z.enum(["GUARANTOR", "INDIVIDUAL"]),
+  participantId: z.string().min(1),
+  financingProgramId: z.string().min(1).optional(),
+  bureau: z.enum(["EQUIFAX", "EXPERIAN", "TRANSUNION"]),
+  ficoScore: z.number().int().min(300).max(850).optional(),
+  pulledBy: z.string().min(1, "Record who initiated this pull"),
+});
+
 // Accepting an offer (marks the winning Decision as the AcceptedOffer).
 export const acceptOfferInputSchema = z.object({
   decisionId: z.string().min(1),

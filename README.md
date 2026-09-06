@@ -9,7 +9,8 @@ model, lifecycle design, and the reasoning behind this rebuild.
 
 **Status:** Phase 1 pilot build. Construction/heavy-equipment vertical,
 single manufacturer, manual lender-submission and decision logging (no live
-bureau pull or lender API), no auth yet. This branch supersedes the
+bureau pull or lender API, outside one rare routing-rule exception — see
+docs/blueprint.md), no auth yet. This branch supersedes the
 consumer-only prototype on `main` — see `docs/blueprint.md`, "What changed
 from the original prototype." **Do not use with real applicant data** until
 the legal/compliance review described in the full blueprint document is
@@ -98,6 +99,7 @@ src/
     api/applications/                                  # intake endpoint (both applicant types)
     api/applications/[id]/submissions/                 # log a lender submission
     api/submissions/[id]/decision/                     # record a decision
+    api/applications/[id]/bureau-pull/                  # log a bureau pull (rare — see docs/blueprint.md)
     api/applications/[id]/accept/                      # accept an offer
     api/applications/[id]/fund/                        # confirm funding
   components/            # ApplicantTypeSelector, IntakeForm (business),

@@ -23,13 +23,13 @@ model Manufacturer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  dealers           Dealer[]
-  financingPrograms FinancingProgram[]
-  businessApplicants BusinessApplicant[]
+  dealers              Dealer[]
+  financingPrograms    FinancingProgram[]
+  businessApplicants   BusinessApplicant[]
   individualApplicants IndividualApplicant[]
-  applications      Application[]
-  auditLogEntries   AuditLogEntry[]
-  dataRetentionEvents DataRetentionEvent[]
+  applications         Application[]
+  auditLogEntries      AuditLogEntry[]
+  dataRetentionEvents  DataRetentionEvent[]
 
   @@map("manufacturers")
 }
@@ -85,12 +85,21 @@ model FinancingProgram {
   name           String
   type           FinancingProgramType
   isActive       Boolean              @default(true)
+  // Rare: most programs have no score threshold and leave this null, so no
+  // bureau pull happens before submission — the lender pulls credit on
+  // their own systems after receiving the routed application (Blueprint
+  // §1.4/§2.1's default posture). When a program's own eligibility rule
+  // requires knowing the applicant's/guarantor's FICO score to decide
+  // whether to even route to it, this is set, and BureauPull below records
+  // the platform-initiated pull that rule requires (updated 2026-09-06).
+  minFicoScore   Int?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
-  manufacturer Manufacturer     @relation(fields: [manufacturerId], references: [id])
-  lender       Lender           @relation(fields: [lenderId], references: [id])
+  manufacturer Manufacturer       @relation(fields: [manufacturerId], references: [id])
+  lender       Lender             @relation(fields: [lenderId], references: [id])
   submissions  LenderSubmission[]
+  bureauPulls  BureauPull[]
 
   @@map("financing_programs")
 }
@@ -127,12 +136,12 @@ model BusinessApplicant {
 // assumed (Blueprint §1.4). Not a consumer-report subject by itself; only
 // becomes one if also captured as a Guarantor who is credit-pulled.
 model Owner {
-  id                  String  @id @default(cuid())
+  id                  String   @id @default(cuid())
   businessApplicantId String
   firstName           String
   lastName            String
   title               String?
-  ownershipPercent     Decimal? @db.Decimal(5, 2)
+  ownershipPercent    Decimal? @db.Decimal(5, 2)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -196,7 +205,7 @@ model IndividualApplicant {
 // ---------------------------------------------------------------------------
 
 model Guarantor {
-  id            String   @id @default(cuid())
+  id            String  @id @default(cuid())
   applicationId String
   ownerId       String?
   firstName     String
@@ -286,28 +295,29 @@ enum ApplicationStatus {
 }
 
 model Application {
-  id                    String        @id @default(cuid())
+  id                    String            @id @default(cuid())
   manufacturerId        String
   dealerId              String
   applicantType         ApplicantType
   businessApplicantId   String?
   individualApplicantId String?
   equipmentDescription  String
-  requestedAmount       Decimal       @db.Decimal(12, 2)
+  requestedAmount       Decimal           @db.Decimal(12, 2)
   status                ApplicationStatus @default(SUBMITTED)
-  needsReconciliation   Boolean       @default(false)
+  needsReconciliation   Boolean           @default(false)
   submittedAt           DateTime?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   manufacturer        Manufacturer         @relation(fields: [manufacturerId], references: [id])
-  dealer               Dealer               @relation(fields: [dealerId], references: [id])
-  businessApplicant    BusinessApplicant?   @relation(fields: [businessApplicantId], references: [id])
-  individualApplicant  IndividualApplicant? @relation(fields: [individualApplicantId], references: [id])
-  guarantors           Guarantor[]
-  consentRecords       ConsentRecord[]
-  lenderSubmissions    LenderSubmission[]
-  acceptedOffer        AcceptedOffer?
+  dealer              Dealer               @relation(fields: [dealerId], references: [id])
+  businessApplicant   BusinessApplicant?   @relation(fields: [businessApplicantId], references: [id])
+  individualApplicant IndividualApplicant? @relation(fields: [individualApplicantId], references: [id])
+  guarantors          Guarantor[]
+  consentRecords      ConsentRecord[]
+  lenderSubmissions   LenderSubmission[]
+  bureauPulls         BureauPull[]
+  acceptedOffer       AcceptedOffer?
 
   @@index([manufacturerId, dealerId])
   @@index([manufacturerId, status])
@@ -365,6 +375,52 @@ model Decision {
   @@map("decisions")
 }
 
+// ---------------------------------------------------------------------------
+// Bureau pulls — the one exception to "the platform never pulls a credit
+// bureau itself" (Blueprint §2.1/§2.2 default posture, corrected
+// 2026-09-06). In the ordinary case, a lender pulls credit on their own
+// systems after receiving a routed LenderSubmission, and this schema never
+// models that pull directly — only their eventual Decision. But some
+// programs' own routing/eligibility rules require knowing a FICO score
+// BEFORE deciding whether to even submit to them (FinancingProgram.
+// minFicoScore, when set) — a rare case, but one where the platform itself
+// becomes the one requesting the report, not the lender. That makes the
+// platform operator a "user" of consumer reports under FCRA for this
+// specific action, with its own permissible-purpose basis (the applicant's
+// or guarantor's CREDIT_PULL consent, recorded the same as it is for a
+// lender's downstream pull) — see /docs/blueprint.md and confirm this is in
+// scope for the recurring legal review before relying on it with real
+// applicant data. Only a Guarantor or an IndividualApplicant can be the
+// subject here (participantType), never a BusinessApplicant — a business is
+// never a consumer-report subject. Phase 1 has no live bureau API; this is
+// a manual record of a pull performed outside this system, same pattern as
+// Decision.enteredBy.
+// ---------------------------------------------------------------------------
+
+enum CreditBureau {
+  EQUIFAX
+  EXPERIAN
+  TRANSUNION
+}
+
+model BureauPull {
+  id                 String                 @id @default(cuid())
+  applicationId      String
+  participantType    ConsentParticipantType
+  participantId      String
+  financingProgramId String?
+  bureau             CreditBureau
+  ficoScore          Int?
+  pulledBy           String
+  pulledAt           DateTime               @default(now())
+
+  application      Application       @relation(fields: [applicationId], references: [id])
+  financingProgram FinancingProgram? @relation(fields: [financingProgramId], references: [id])
+
+  @@index([applicationId])
+  @@map("bureau_pulls")
+}
+
 // The single offer the applicant chose, if any. One-to-one with
 // Application: an application has zero-or-one accepted offer.
 model AcceptedOffer {
@@ -373,8 +429,8 @@ model AcceptedOffer {
   decisionId    String   @unique
   acceptedAt    DateTime @default(now())
 
-  application     Application      @relation(fields: [applicationId], references: [id])
-  decision        Decision         @relation(fields: [decisionId], references: [id])
+  application       Application        @relation(fields: [applicationId], references: [id])
+  decision          Decision           @relation(fields: [decisionId], references: [id])
   fundedTransaction FundedTransaction?
 
   @@map("accepted_offers")

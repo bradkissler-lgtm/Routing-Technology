@@ -36,6 +36,10 @@ export default async function ApplicationDetailPage({
         include: { financingProgram: { include: { lender: true } }, decision: true },
         orderBy: { createdAt: "asc" },
       },
+      bureauPulls: {
+        include: { financingProgram: { include: { lender: true } } },
+        orderBy: { pulledAt: "asc" },
+      },
       acceptedOffer: { include: { decision: true, fundedTransaction: true } },
     },
   });
@@ -107,6 +111,29 @@ export default async function ApplicationDetailPage({
         </ul>
       </section>
 
+      {application.bureauPulls.length > 0 && (
+        <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <h2 className="text-sm font-semibold text-slate-900">Bureau pulls</h2>
+          <p className="mt-1 text-xs text-amber-800">
+            The platform pulled these directly — the rare routing-rule exception, not the
+            lender&rsquo;s own downstream decisioning pull.
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-slate-700">
+            {application.bureauPulls.map((pull) => (
+              <li key={pull.id}>
+                {pull.bureau}
+                {pull.ficoScore ? ` · FICO ${pull.ficoScore}` : ""}
+                {pull.financingProgram
+                  ? ` · for ${pull.financingProgram.lender.name} — ${pull.financingProgram.name}`
+                  : ""}
+                {" · "}
+                {new Date(pull.pulledAt).toLocaleDateString()} by {pull.pulledBy}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="text-sm font-semibold text-slate-900">Lender submissions</h2>
         <div className="mt-2 space-y-3">
@@ -161,6 +188,26 @@ export default async function ApplicationDetailPage({
           }))}
         hasAcceptedOffer={application.acceptedOffer !== null}
         hasFundedTransaction={application.acceptedOffer?.fundedTransaction != null}
+        bureauPullSubjects={[
+          ...application.guarantors
+            .filter((g) => g.consentCreditPull)
+            .map((g) => ({
+              id: `GUARANTOR:${g.id}`,
+              label: `${g.firstName} ${g.lastName} (guarantor)`,
+              participantType: "GUARANTOR" as const,
+              participantId: g.id,
+            })),
+          ...(application.individualApplicant
+            ? [
+                {
+                  id: `INDIVIDUAL:${application.individualApplicant.id}`,
+                  label: `${application.individualApplicant.firstName} ${application.individualApplicant.lastName} (applicant)`,
+                  participantType: "INDIVIDUAL" as const,
+                  participantId: application.individualApplicant.id,
+                },
+              ]
+            : []),
+        ]}
       />
     </main>
   );
