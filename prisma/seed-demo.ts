@@ -7,19 +7,22 @@ const prisma = new PrismaClient();
 /**
  * Populates a full sales-demo storyline on top of the base manufacturer/
  * dealer/lender/program/user data (see seedBaseData in ./seed.ts). Unlike
- * seed.ts — a clean slate for local dev/testing — this script exists to
- * make the platform demo-ready: every application status, every decision
- * outcome, all three dealers, all three financing programs (including the
- * rare FICO-routing-rule/BureauPull path), and one honestly-unresolved
- * "needs reconciliation" case are all represented, because a sales demo
- * that only shows manufactured wins isn't credible to a technical buyer.
+ * seed.ts — a clean slate for local dev/testing — this exists to make the
+ * platform demo-ready: every application status, every decision outcome,
+ * all three dealers, all three financing programs (including the rare
+ * FICO-routing-rule/BureauPull path), and one honestly-unresolved "needs
+ * reconciliation" case are all represented, because a sales demo that only
+ * shows manufactured wins isn't credible to a technical buyer.
  *
- * Run this once against a fresh database (after `prisma migrate deploy`)
- * — it is not idempotent the way seed.ts is; running it twice creates a
+ * Exported so both the CLI entry point below and src/app/api/admin/seed-demo
+ * (a browser-triggerable one-time route for environments where running a
+ * local command isn't practical) can call it against any PrismaClient.
+ * Run this once against a fresh database (after `prisma migrate deploy`) —
+ * it is not idempotent the way seed.ts is; running it twice creates a
  * second copy of every application.
  */
-async function main() {
-  const { manufacturer, dealers, captiveProgram, thirdPartyProgram } = await seedBaseData(prisma);
+export async function seedDemoData(db: PrismaClient) {
+  const { manufacturer, dealers, captiveProgram, thirdPartyProgram } = await seedBaseData(db);
   const dlr001 = dealers.find((d) => d.code === "DLR-001")!;
   const dlr002 = dealers.find((d) => d.code === "DLR-002")!;
   const dlr003 = dealers.find((d) => d.code === "DLR-003")!;
@@ -28,12 +31,12 @@ async function main() {
   // submission — the rare BureauPull exception (Blueprint §1.2/§2.1,
   // updated 2026-09-06), so the demo has a real example of it, not just a
   // description.
-  const specialtyLender = await prisma.lender.upsert({
+  const specialtyLender = await db.lender.upsert({
     where: { id: "demo-specialty-lender" },
     update: {},
     create: { id: "demo-specialty-lender", name: "Timberline Finance Partners" },
   });
-  const ficoGatedProgram = await prisma.financingProgram.upsert({
+  const ficoGatedProgram = await db.financingProgram.upsert({
     where: { id: "demo-fico-gated-program" },
     update: {},
     create: {
@@ -47,7 +50,7 @@ async function main() {
   });
 
   async function auditLog(entityType: string, entityId: string, action: string, opts: { actorId?: string; payload?: Record<string, unknown> } = {}) {
-    await recordAuditEvent(prisma, {
+    await recordAuditEvent(db, {
       manufacturerId: manufacturer.id,
       entityType,
       entityId,
@@ -74,7 +77,7 @@ async function main() {
     status: "SUBMITTED" | "IN_PROGRESS" | "ACCEPTED" | "FUNDED" | "CLOSED_LOST";
     needsReconciliation?: boolean;
   }) {
-    const businessApplicant = await prisma.businessApplicant.create({
+    const businessApplicant = await db.businessApplicant.create({
       data: {
         manufacturerId: manufacturer.id,
         legalName: input.legalName,
@@ -87,7 +90,7 @@ async function main() {
     });
     await auditLog("BusinessApplicant", businessApplicant.id, "CREATE");
 
-    const owner = await prisma.owner.create({
+    const owner = await db.owner.create({
       data: {
         businessApplicantId: businessApplicant.id,
         firstName: input.ownerFirstName,
@@ -97,7 +100,7 @@ async function main() {
       },
     });
 
-    const application = await prisma.application.create({
+    const application = await db.application.create({
       data: {
         manufacturerId: manufacturer.id,
         dealerId: input.dealerId,
@@ -112,14 +115,14 @@ async function main() {
     });
     await auditLog("Application", application.id, "SUBMIT");
 
-    await prisma.consentRecord.createMany({
+    await db.consentRecord.createMany({
       data: [
         { applicationId: application.id, participantType: "BUSINESS", participantId: businessApplicant.id, purpose: "DATA_SHARING", granted: true },
         { applicationId: application.id, participantType: "BUSINESS", participantId: businessApplicant.id, purpose: "MARKETING", granted: false },
       ],
     });
 
-    const guarantor = await prisma.guarantor.create({
+    const guarantor = await db.guarantor.create({
       data: {
         applicationId: application.id,
         ownerId: owner.id,
@@ -136,7 +139,7 @@ async function main() {
       },
     });
     await auditLog("Guarantor", guarantor.id, "CREATE");
-    await prisma.consentRecord.createMany({
+    await db.consentRecord.createMany({
       data: [
         { applicationId: application.id, participantType: "GUARANTOR", participantId: guarantor.id, purpose: "CREDIT_PULL", granted: true },
         { applicationId: application.id, participantType: "GUARANTOR", participantId: guarantor.id, purpose: "DATA_SHARING", granted: true },
@@ -162,7 +165,7 @@ async function main() {
     needsReconciliation?: boolean;
     coSigner?: { firstName: string; lastName: string };
   }) {
-    const individualApplicant = await prisma.individualApplicant.create({
+    const individualApplicant = await db.individualApplicant.create({
       data: {
         manufacturerId: manufacturer.id,
         firstName: input.firstName,
@@ -178,7 +181,7 @@ async function main() {
     });
     await auditLog("IndividualApplicant", individualApplicant.id, "CREATE");
 
-    const application = await prisma.application.create({
+    const application = await db.application.create({
       data: {
         manufacturerId: manufacturer.id,
         dealerId: input.dealerId,
@@ -193,7 +196,7 @@ async function main() {
     });
     await auditLog("Application", application.id, "SUBMIT");
 
-    await prisma.consentRecord.createMany({
+    await db.consentRecord.createMany({
       data: [
         { applicationId: application.id, participantType: "INDIVIDUAL", participantId: individualApplicant.id, purpose: "CREDIT_PULL", granted: true },
         { applicationId: application.id, participantType: "INDIVIDUAL", participantId: individualApplicant.id, purpose: "DATA_SHARING", granted: true },
@@ -203,7 +206,7 @@ async function main() {
 
     let guarantor = null;
     if (input.coSigner) {
-      guarantor = await prisma.guarantor.create({
+      guarantor = await db.guarantor.create({
         data: {
           applicationId: application.id,
           firstName: input.coSigner.firstName,
@@ -219,7 +222,7 @@ async function main() {
         },
       });
       await auditLog("Guarantor", guarantor.id, "CREATE");
-      await prisma.consentRecord.createMany({
+      await db.consentRecord.createMany({
         data: [
           { applicationId: application.id, participantType: "GUARANTOR", participantId: guarantor.id, purpose: "CREDIT_PULL", granted: true },
           { applicationId: application.id, participantType: "GUARANTOR", participantId: guarantor.id, purpose: "DATA_SHARING", granted: true },
@@ -231,7 +234,7 @@ async function main() {
   }
 
   async function submit(applicationId: string, financingProgramId: string) {
-    const submission = await prisma.lenderSubmission.create({
+    const submission = await db.lenderSubmission.create({
       data: { applicationId, financingProgramId },
     });
     await auditLog("LenderSubmission", submission.id, "CREATE", { payload: { financingProgramId } });
@@ -245,16 +248,16 @@ async function main() {
     reasonText: string,
     enteredBy: string,
   ) {
-    const decision = await prisma.decision.create({
+    const decision = await db.decision.create({
       data: { lenderSubmissionId: submissionId, outcome, reasonCode, reasonText, enteredBy },
     });
-    await prisma.lenderSubmission.update({ where: { id: submissionId }, data: { status: "DECISIONED" } });
+    await db.lenderSubmission.update({ where: { id: submissionId }, data: { status: "DECISIONED" } });
     await auditLog("Decision", decision.id, "CREATE", { actorId: enteredBy, payload: { outcome, reasonCode } });
     return decision;
   }
 
   async function accept(applicationId: string, decisionId: string) {
-    const acceptedOffer = await prisma.acceptedOffer.create({
+    const acceptedOffer = await db.acceptedOffer.create({
       data: { applicationId, decisionId },
     });
     await auditLog("AcceptedOffer", acceptedOffer.id, "CREATE");
@@ -262,7 +265,7 @@ async function main() {
   }
 
   async function fund(acceptedOfferId: string, fundedAmount: number) {
-    const fundedTransaction = await prisma.fundedTransaction.create({
+    const fundedTransaction = await db.fundedTransaction.create({
       data: { acceptedOfferId, fundedAmount },
     });
     await auditLog("FundedTransaction", fundedTransaction.id, "CREATE");
@@ -278,7 +281,7 @@ async function main() {
     ficoScore: number;
     pulledBy: string;
   }) {
-    const pull = await prisma.bureauPull.create({
+    const pull = await db.bureauPull.create({
       data: {
         applicationId: input.applicationId,
         participantType: input.participantType,
@@ -480,15 +483,24 @@ async function main() {
     await decide(sub.id, "COUNTERED", "TERM_ADJUSTMENT", "Approved at a shorter term (48 mo. instead of 60) given the truck's age; awaiting applicant response.", "Jordan (Cascade Construction Equipment)");
   }
 
-  console.log(`Seeded 8 applications across ${dealers.length} dealers and 3 financing programs (captive, third-party, and the FICO-gated Timberline program).`);
-  console.log("Statuses represented: SUBMITTED (flagged for reconciliation), IN_PROGRESS (pending + countered), ACCEPTED, FUNDED (x3), CLOSED_LOST.");
+  return {
+    dealerCount: dealers.length,
+    applicationCount: 8,
+    summary:
+      "Seeded 8 applications across 3 dealers and 3 financing programs (captive, third-party, and the FICO-gated Timberline program). Statuses represented: SUBMITTED (flagged for reconciliation), IN_PROGRESS (pending + countered), ACCEPTED, FUNDED (x3), CLOSED_LOST.",
+  };
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (require.main === module) {
+  seedDemoData(prisma)
+    .then((result) => {
+      console.log(result.summary);
+    })
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

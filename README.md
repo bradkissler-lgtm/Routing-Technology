@@ -145,11 +145,20 @@ Vercel with a hosted Postgres database:
    `migrate dev`.
 5. **Seed once, after the first successful deploy.** Vercel doesn't run
    seed scripts automatically (a seed is a one-time data load, not part of
-   the build). From your machine, with the production `DATABASE_URL` set
-   locally for this one command only:
-   ```bash
-   DATABASE_URL="<paste the production connection string>" npm run db:seed:demo
-   ```
+   the build). Two ways to do it:
+   - **From a terminal**, with the production `DATABASE_URL` set locally
+     for this one command only:
+     ```bash
+     DATABASE_URL="<paste the production connection string>" npm run db:seed:demo
+     ```
+   - **From a browser**, no terminal needed: set a `SEED_ADMIN_TOKEN`
+     environment variable on the Vercel project (any random string), then
+     visit `<your-deployed-url>/api/admin/seed-demo?token=<that value>`.
+     It refuses to run twice against the same database (checked by
+     application count), so an accidental second click won't duplicate
+     the demo data. Delete `src/app/api/admin/seed-demo/` once you've used
+     it — it has no reason to stay in production after its one use.
+
    Then visit the Vercel-assigned URL and sign in with the credentials in
    "Sign in" above — it's now a real link you can send or pull up in any
    meeting, not dependent on your laptop.
@@ -190,6 +199,7 @@ src/
     api/applications/[id]/bureau-pull/                    # log a bureau pull (rare — see docs/blueprint.md)
     api/applications/[id]/accept/                        # accept an offer
     api/applications/[id]/fund/                          # confirm funding
+    api/admin/seed-demo/                                  # one-time, token-gated sales-demo seed (browser-triggerable, no auth) — delete after use
   components/            # ApplicantTypeSelector, IntakeForm (business),
                           # IndividualIntakeForm (consumer), ApplicationOpsPanel, StatusBadge,
                           # LoginForm, SignOutButton
