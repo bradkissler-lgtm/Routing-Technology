@@ -1,60 +1,184 @@
 import { describe, expect, it } from "vitest";
-import { creditApplicationInputSchema } from "../validation";
+import { applicationIntakeSchema, bureauPullInputSchema } from "../validation";
 
-const validInput = {
+const validBusinessInput = {
+  applicantType: "BUSINESS" as const,
   dealerCode: "DLR-001",
-  buyer: {
+  business: {
+    legalName: "Cascade Excavation LLC",
+    ein: "12-3456789",
+    addressLine1: "500 Industrial Way",
+    city: "Bend",
+    state: "or",
+    postalCode: "97701",
+    consent: { dataSharing: true, marketing: false },
+  },
+  owners: [{ firstName: "Dana", lastName: "Ruiz", title: "Managing Member", ownershipPercent: 100 }],
+  guarantors: [
+    {
+      firstName: "Dana",
+      lastName: "Ruiz",
+      addressLine1: "12 River Rd",
+      city: "Bend",
+      state: "or",
+      postalCode: "97701",
+      ssnLast4: "1234",
+      ownerIndex: 0,
+      consent: { creditPull: true, dataSharing: true },
+    },
+  ],
+  equipment: { description: "CAT 320 Excavator", requestedAmount: 185_000 },
+};
+
+const validIndividualInput = {
+  applicantType: "INDIVIDUAL" as const,
+  dealerCode: "DLR-001",
+  individual: {
     firstName: "Jamie",
     lastName: "Rivera",
     email: "jamie@example.com",
     phone: "5551234567",
     addressLine1: "123 Main St",
-    city: "Springfield",
-    state: "il",
-    postalCode: "62701",
-    ssnLast4: "1234",
+    city: "Bend",
+    state: "or",
+    postalCode: "97701",
+    ssnLast4: "5678",
+    consent: { creditPull: true, dataSharing: true, marketing: false },
   },
-  application: {
-    productDescription: "Model X Utility Trailer",
-    requestedAmount: 12_500,
-  },
-  consent: {
-    creditPull: true,
-    dataSharing: true,
-    marketing: false,
-  },
+  equipment: { description: "Compact Utility Tractor", requestedAmount: 32_000 },
 };
 
-describe("creditApplicationInputSchema", () => {
-  it("accepts a well-formed submission and uppercases the state code", () => {
-    const result = creditApplicationInputSchema.parse(validInput);
-    expect(result.buyer.state).toBe("IL");
+describe("applicationIntakeSchema — business path", () => {
+  it("accepts a well-formed submission and uppercases state codes", () => {
+    const result = applicationIntakeSchema.parse(validBusinessInput);
+    if (result.applicantType !== "BUSINESS") throw new Error("expected BUSINESS");
+    expect(result.business.state).toBe("OR");
+    expect(result.guarantors[0].state).toBe("OR");
   });
 
-  it("rejects a submission without credit-pull consent", () => {
-    const invalid = {
-      ...validInput,
-      consent: { ...validInput.consent, creditPull: false },
-    };
-
-    expect(() => creditApplicationInputSchema.parse(invalid)).toThrow();
+  it("requires at least one owner", () => {
+    const invalid = { ...validBusinessInput, owners: [] };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
   });
 
-  it("rejects a malformed ZIP code", () => {
-    const invalid = {
-      ...validInput,
-      buyer: { ...validInput.buyer, postalCode: "abc" },
-    };
+  it("requires at least one guarantor", () => {
+    const invalid = { ...validBusinessInput, guarantors: [] };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
+  });
 
-    expect(() => creditApplicationInputSchema.parse(invalid)).toThrow();
+  it("rejects a guarantor who has not authorized their own credit pull, even if the business consented to data sharing", () => {
+    const invalid = {
+      ...validBusinessInput,
+      guarantors: [
+        { ...validBusinessInput.guarantors[0], consent: { creditPull: false, dataSharing: true } },
+      ],
+    };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
   });
 
   it("rejects a non-positive requested amount", () => {
     const invalid = {
-      ...validInput,
-      application: { ...validInput.application, requestedAmount: 0 },
+      ...validBusinessInput,
+      equipment: { ...validBusinessInput.equipment, requestedAmount: 0 },
     };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
+  });
+});
 
-    expect(() => creditApplicationInputSchema.parse(invalid)).toThrow();
+describe("applicationIntakeSchema — individual (consumer) path", () => {
+  it("accepts a well-formed submission with no co-signer", () => {
+    const result = applicationIntakeSchema.parse(validIndividualInput);
+    if (result.applicantType !== "INDIVIDUAL") throw new Error("expected INDIVIDUAL");
+    expect(result.individual.state).toBe("OR");
+    expect(result.guarantor).toBeUndefined();
+  });
+
+  it("accepts an optional co-signer using the same guarantor shape", () => {
+    const withCoSigner = {
+      ...validIndividualInput,
+      guarantor: {
+        firstName: "Morgan",
+        lastName: "Lee",
+        addressLine1: "9 Oak St",
+        city: "Bend",
+        state: "or",
+        postalCode: "97701",
+        ssnLast4: "4321",
+        consent: { creditPull: true, dataSharing: true },
+      },
+    };
+    const result = applicationIntakeSchema.parse(withCoSigner);
+    if (result.applicantType !== "INDIVIDUAL") throw new Error("expected INDIVIDUAL");
+    expect(result.guarantor?.state).toBe("OR");
+  });
+
+  it("rejects an applicant who has not authorized their own credit pull", () => {
+    const invalid = {
+      ...validIndividualInput,
+      individual: {
+        ...validIndividualInput.individual,
+        consent: { creditPull: false, dataSharing: true, marketing: false },
+      },
+    };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
+  });
+
+  it("rejects a co-signer who has not authorized their own credit pull", () => {
+    const invalid = {
+      ...validIndividualInput,
+      guarantor: {
+        firstName: "Morgan",
+        lastName: "Lee",
+        addressLine1: "9 Oak St",
+        city: "Bend",
+        state: "or",
+        postalCode: "97701",
+        ssnLast4: "4321",
+        consent: { creditPull: false, dataSharing: true },
+      },
+    };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
+  });
+
+  it("rejects a non-positive requested amount", () => {
+    const invalid = {
+      ...validIndividualInput,
+      equipment: { ...validIndividualInput.equipment, requestedAmount: 0 },
+    };
+    expect(() => applicationIntakeSchema.parse(invalid)).toThrow();
+  });
+});
+
+describe("bureauPullInputSchema — the rare platform-initiated pull", () => {
+  const valid = {
+    participantType: "GUARANTOR" as const,
+    participantId: "guarantor_1",
+    bureau: "EQUIFAX" as const,
+    ficoScore: 720,
+    pulledBy: "Jordan (ops)",
+  };
+
+  it("accepts a well-formed pull with a FICO score", () => {
+    expect(bureauPullInputSchema.parse(valid)).toMatchObject(valid);
+  });
+
+  it("accepts an INDIVIDUAL subject with no financing program named", () => {
+    const input = { ...valid, participantType: "INDIVIDUAL" as const, participantId: "ind_1" };
+    expect(bureauPullInputSchema.parse(input).financingProgramId).toBeUndefined();
+  });
+
+  it("rejects a BUSINESS participant type — a business is never a consumer-report subject", () => {
+    const invalid = { ...valid, participantType: "BUSINESS" };
+    expect(() => bureauPullInputSchema.parse(invalid)).toThrow();
+  });
+
+  it("rejects a FICO score outside the valid 300-850 range", () => {
+    expect(() => bureauPullInputSchema.parse({ ...valid, ficoScore: 250 })).toThrow();
+    expect(() => bureauPullInputSchema.parse({ ...valid, ficoScore: 900 })).toThrow();
+  });
+
+  it("requires recording who pulled it", () => {
+    const invalid = { ...valid, pulledBy: "" };
+    expect(() => bureauPullInputSchema.parse(invalid)).toThrow();
   });
 });
